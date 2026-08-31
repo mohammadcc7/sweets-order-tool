@@ -5,6 +5,28 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+def identify_section_type(df_sheet):
+    """
+    دالة ذكية لفحص محتوى الملف وتحديد القسم التابع له بناءً على المنتجات بداخله
+    """
+    content_text = ""
+    for col in df_sheet.columns:
+        content_text += " ".join(df_sheet[col].astype(str).tolist()) + " "
+    
+    content_text = content_text.lower()
+    
+    # تحديد القسم بناءً على الكلمات الدلالية في محتوى الملف
+    if "هريسة" in content_text and "صنوبر" in content_text:
+        return "قسم_الهريسة"
+    elif "برازق" in content_text or "معمول" in content_text or "اكسترا" in content_text or "بلورية" in content_text:
+        return "قسم_الحلو_العربي"
+    elif "غريبة بالقشطة" in content_text or "كريز فرنسي" in content_text:
+        return "قسم_الغريبة"
+    elif "أكياس القطر" in content_text or "جبنة حلوم" in content_text or "أساور الست" in content_text:
+        return "قسم_الفرن"
+    else:
+        return "طلبيات_عامة"
+
 def process_excel_files():
     file_paths = filedialog.askopenfilenames(
         title="اختر ملفات الاكسل المطلوبة",
@@ -25,16 +47,17 @@ def process_excel_files():
             target_sheet = 'حركة المواد المطلوبة' if 'حركة المواد المطلوبة' in sheet_names else sheet_names[0]
             df_sheet = pd.read_excel(file_path, sheet_name=target_sheet)
             
-            sheet_title = str(target_sheet).strip()
+            # التعرف التلقائي على اسم القسم بناءً على محتوى الجدول
+            section_name = identify_section_type(df_sheet)
             
             wb = Workbook()
             ws = wb.active
-            ws.title = sheet_title[:31]
+            ws.title = section_name[:31]
             ws.sheet_view.rightToLeft = True
             
             # العنوان الرئيسي
             ws.merge_cells('A1:C1')
-            ws['A1'] = sheet_title
+            ws['A1'] = section_name.replace('_', ' ')
             ws['A1'].font = Font(name='Tahoma', size=13, bold=True, color='FFFFFF')
             ws['A1'].fill = PatternFill(start_color='333333', end_color='333333', fill_type='solid')
             ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
@@ -98,25 +121,25 @@ def process_excel_files():
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
                 
-            safe_filename = sheet_title.replace('/', '-').replace('\\', '-')
-            output_excel_path = os.path.join(output_dir, f"{safe_filename}.xlsx")
+            # حفظ الملف الناتج بالاسم الذكي المكتشف لمنع التداخل
+            output_excel_path = os.path.join(output_dir, f"{section_name}.xlsx")
             wb.save(output_excel_path)
             success_count += 1
             
         except Exception as e:
             print(f"خطأ في معالجة الملف {file_path}: {e}")
             
-    messagebox.showinfo("اكتمل التجهيز", f"تم معالجة وتنسيق وتصدير {success_count} ملف إكسل بنجاح وتسميتها بأسماء الأوراق الداخلية!")
+    messagebox.showinfo("اكتمل التجهيز", f"تم التعرف على {success_count} ملف ومعالجتها وتسميتها بالقسم المخصص تلقائياً!")
 
 root = Tk()
-root.title("معالج طلبيات الحلويات")
+root.title("معالج طلبيات الحلويات الذكي")
 root.geometry("420x260")
 root.config(bg="#f5f5f5")
 
-label = Label(root, text="نظام تنسيق وتصدير ملفات الإكسل", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
+label = Label(root, text="نظام التعرف والتسمية التلقائية للأقسام", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
 label.pack(pady=25)
 
-desc_label = Label(root, text="يقبل عدة ملفات، ينسقها، ويسمي الملف الناتج باسم الورقة الداخلية", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
+desc_label = Label(root, text="يقرأ الملفات، يكتشف نوع القسم من المحتوى، ويسمي الملف تلقائياً", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
 desc_label.pack(pady=5)
 
 btn = Button(root, text="اختيار ملفات الإكسل والبدء", command=process_excel_files, font=("Tahoma", 11, "bold"), bg="#1b5e20", fg="white", padx=15, pady=8)
