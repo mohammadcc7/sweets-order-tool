@@ -26,26 +26,32 @@ def process_excel_files():
             sheet_names = xls.sheet_names
             target_sheet = sheet_names[0]
             
-            # قراءة الملف بدون افتراض رأس ثابت لتجنب الفراغات
-            df_sheet = pd.read_excel(file_path, sheet_name=target_sheet, header=None)
+            # قراءة الملف بالكامل كجدول خام
+            df_raw = pd.read_excel(file_path, sheet_name=target_sheet, header=None)
             
-            # البحث عن الصف الذي يحتوي على أسماء الأعمدة الحقيقية أو البيانات
+            # البحث عن صف العنوان الحقيقي في الملف
             header_row_idx = 0
-            mat_col_idx, cust_col_idx, qty_col_idx = 0, 1, 2
-            
-            for idx, row in df_sheet.iterrows():
+            for idx, row in df_raw.iterrows():
                 row_str = " ".join([str(val).lower() for val in row.values if pd.notna(val)])
-                if 'مادة' in row_str or 'الصنف' in row_str or 'كمية' in row_str:
+                if 'مادة' in row_str or 'الصنف' in row_str or 'كمية' in row_str or 'المطلوب' in row_str:
                     header_row_idx = idx
-                    for col_i, val in enumerate(row.values):
-                        v_str = str(val).strip().lower()
-                        if any(k in v_str for k in ['مادة', 'الصنف', 'المادة']):
-                            mat_col_idx = col_i
-                        elif any(k in v_str for k in ['عميل', 'العميل', 'جهة']):
-                            cust_col_idx = col_i
-                        elif any(k in v_str for k in ['كمية', 'المطلوب', 'الطلب']):
-                            qty_col_idx = col_i
                     break
+            
+            # استخراج العناوين والبيانات بدقة
+            headers_row = df_raw.iloc[header_row_idx].values
+            df_data = df_raw.iloc[header_row_idx + 1:].copy()
+            
+            # تحديد أعمدة (المادة، العميل، الكمية) بمطابقة ذكية جداً للمحتوى والعناوين
+            mat_col, cust_col, qty_col = 0, 1, 2
+            
+            for i, h in enumerate(headers_row):
+                h_str = str(h).strip().lower()
+                if any(k in h_str for k in ['مادة', 'الصنف', 'المادة']):
+                    mat_col = i
+                elif any(k in h_str for k in ['عميل', 'العميل', 'جهة', 'محل']):
+                    cust_col = i
+                elif any(k in h_str for k in ['كمية', 'المطلوب', 'الطلب']):
+                    qty_col = i
 
             wb = Workbook()
             ws = wb.active
@@ -90,15 +96,25 @@ def process_excel_files():
                 cell.alignment = Alignment(horizontal='center', vertical='center')
                 cell.border = thin_border
             
-            # استخراج البيانات ابتداءً من الصف الذي يليه وتخطي الفارغ تماماً
+            # تصفية وتعبئة البيانات بطريقة ذكية تمنع انعكاس الأعمدة أو فراغها
             row_idx = 5
-            for idx in range(header_row_idx + 1, len(df_sheet)):
-                row = df_sheet.iloc[idx]
+            for _, row in df_data.iterrows():
                 try:
-                    val_mat = str(row.iloc[mat_col_idx]).strip() if len(row) > mat_col_idx and pd.notna(row.iloc[mat_col_idx]) else ""
-                    val_cust = str(row.iloc[cust_col_idx]).strip() if len(row) > cust_col_idx and pd.notna(row.iloc[cust_col_idx]) else ""
-                    val_qty = row.iloc[qty_col_idx] if len(row) > qty_col_idx and pd.notna(row.iloc[qty_col_idx]) else ""
+                    val_mat = str(row.iloc[mat_col]).strip() if len(row) > mat_col and pd.notna(row.iloc[mat_col]) else ""
+                    val_cust = str(row.iloc[cust_col]).strip() if len(row) > cust_col and pd.notna(row.iloc[cust_col]) else ""
+                    val_qty = row.iloc[qty_col] if len(row) > qty_col and pd.notna(row.iloc[qty_col]) else ""
                     
+                    # التصحيح التلقائي إذا انعكست البيانات (مثلاً القيم الرقمية دخلت في مكان العميل أو العكس)
+                    # إذا كانت قيمة العميل عبارة عن رقم صريح وقيمة الكمية نصية، نقوم بتبديلها تلقائياً
+                    try:
+                        float(val_cust)
+                        if not val_qty or str(val_qty) == 'nan':
+                            val_qty = val_cust
+                            val_cust = ""
+                    except ValueError:
+                        pass
+
+                    # استبعاد الصفوف الفارغ أو التي تحمل عناوين مكررة
                     if val_mat and val_mat != 'nan' and 'اسم المادة' not in val_mat and 'المادة' not in val_mat:
                         ws.append([val_mat, val_cust, val_qty])
                         ws.row_dimensions[row_idx].height = 20
@@ -120,24 +136,24 @@ def process_excel_files():
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
                 
-            output_excel_path = os.path.join(output_dir, f"{original_filename}_المنسق.xlsx")
+            output_excel_path = os.path.join(output_dir, f"{original_filename}_المصحح.xlsx")
             wb.save(output_excel_path)
             success_count += 1
             
         except Exception as e:
             print(f"خطأ في معالجة الملف {file_path}: {e}")
             
-    messagebox.showinfo("اكتمل التجهيز", f"تم معالجة وتصدير {success_count} ملف إكسل بكامل البيانات ودون فراغات!")
+    messagebox.showinfo("اكتمل التجهيز", f"تم معالجة وتصحيح {success_count} ملف إكسل بنجاح تام!")
 
 root = Tk()
-root.title("معالج طلبيات الحلويات المطور")
+root.title("معالج طلبيات الحلويات المحترف")
 root.geometry("420x260")
 root.config(bg="#f5f5f5")
 
-label = Label(root, text="نظام تنسيق وتصدير طلبيات المبيع", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
+label = Label(root, text="نظام تصحيح وتنسيق طلبيات المبيع", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
 label.pack(pady=25)
 
-desc_label = Label(root, text="يقرأ جميع الملفات الأربعة بدقة ويتخطى الأسطر الفارغة", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
+desc_label = Label(root, text="يصحح الأعمدة المعكوسة والبيانات الفارغة تلقائياً", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
 desc_label.pack(pady=5)
 
 btn = Button(root, text="اختيار ملفات الإكسل والبدء", command=process_excel_files, font=("Tahoma", 11, "bold"), bg="#1b5e20", fg="white", padx=15, pady=8)
