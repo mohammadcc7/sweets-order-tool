@@ -5,28 +5,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-def identify_section_type(df_sheet):
-    """
-    دالة ذكية لفحص محتوى الملف وتحديد القسم التابع له بناءً على المنتجات بداخله
-    """
-    content_text = ""
-    for col in df_sheet.columns:
-        content_text += " ".join(df_sheet[col].astype(str).tolist()) + " "
-    
-    content_text = content_text.lower()
-    
-    # تحديد القسم بناءً على الكلمات الدلالية في محتوى الملف
-    if "هريسة" in content_text and "صنوبر" in content_text:
-        return "قسم_الهريسة"
-    elif "برازق" in content_text or "معمول" in content_text or "اكسترا" in content_text or "بلورية" in content_text:
-        return "قسم_الحلو_العربي"
-    elif "غريبة بالقشطة" in content_text or "كريز فرنسي" in content_text:
-        return "قسم_الغريبة"
-    elif "أكياس القطر" in content_text or "جبنة حلوم" in content_text or "أساور الست" in content_text:
-        return "قسم_الفرن"
-    else:
-        return "طلبيات_عامة"
-
 def process_excel_files():
     file_paths = filedialog.askopenfilenames(
         title="اختر ملفات الاكسل المطلوبة",
@@ -42,22 +20,22 @@ def process_excel_files():
     success_count = 0
     for file_path in file_paths:
         try:
+            # استخراج اسم الملف الأصلي بدقة ليكون اسم الملف الناتج (يمنع دمج الملفات)
+            original_filename = os.path.splitext(os.path.basename(file_path))[0]
+            
             xls = pd.ExcelFile(file_path)
             sheet_names = xls.sheet_names
             target_sheet = 'حركة المواد المطلوبة' if 'حركة المواد المطلوبة' in sheet_names else sheet_names[0]
             df_sheet = pd.read_excel(file_path, sheet_name=target_sheet)
             
-            # التعرف التلقائي على اسم القسم بناءً على محتوى الجدول
-            section_name = identify_section_type(df_sheet)
-            
             wb = Workbook()
             ws = wb.active
-            ws.title = section_name[:31]
+            ws.title = original_filename[:31]
             ws.sheet_view.rightToLeft = True
             
-            # العنوان الرئيسي
+            # العنوان الرئيسي باسم الملف الأصلي
             ws.merge_cells('A1:C1')
-            ws['A1'] = section_name.replace('_', ' ')
+            ws['A1'] = f"قسم {original_filename}"
             ws['A1'].font = Font(name='Tahoma', size=13, bold=True, color='FFFFFF')
             ws['A1'].fill = PatternFill(start_color='333333', end_color='333333', fill_type='solid')
             ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
@@ -71,9 +49,9 @@ def process_excel_files():
             ws['A2'].alignment = Alignment(horizontal='center', vertical='center')
             ws.row_dimensions[2].height = 20
             
-            # رؤوس الأعمدة
+            # رؤوس الأعمدة بالتتيب الصحيح الثابت (المادة يميناً، العميل وسطاً، الكمية يساراً)
             ws.append([])
-            headers = ['المادة', 'اسم العميل', 'الكمية المطلوبة']
+            headers = ['اسم المادة', 'اسم العميل', 'الكمية المطلوبة']
             ws.append(headers)
             
             header_fill = PatternFill(start_color='D0D0D0', end_color='D0D0D0', fill_type='solid')
@@ -93,11 +71,12 @@ def process_excel_files():
                 cell.alignment = Alignment(horizontal='center', vertical='center')
                 cell.border = thin_border
             
-            # بيانات الصفوف
+            # قراءة البيانات وترتيب الأعمدة بشكل صحيح ودقيق
             if len(df_sheet.columns) >= 3:
                 df_data = df_sheet.iloc[1:].copy()
                 row_idx = 5
                 for _, row in df_data.iterrows():
+                    # ضبط استخراج الأعمدة: عمود المادة، عمود العميل، عمود الكمية
                     mat = str(row.iloc[0]).strip()
                     cust = str(row.iloc[1]).strip()
                     qty = row.iloc[2] if len(row) > 2 else row.iloc[-1]
@@ -121,25 +100,24 @@ def process_excel_files():
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
                 
-            # حفظ الملف الناتج بالاسم الذكي المكتشف لمنع التداخل
-            output_excel_path = os.path.join(output_dir, f"{section_name}.xlsx")
+            output_excel_path = os.path.join(output_dir, f"{original_filename}_المنسق.xlsx")
             wb.save(output_excel_path)
             success_count += 1
             
         except Exception as e:
             print(f"خطأ في معالجة الملف {file_path}: {e}")
             
-    messagebox.showinfo("اكتمل التجهيز", f"تم التعرف على {success_count} ملف ومعالجتها وتسميتها بالقسم المخصص تلقائياً!")
+    messagebox.showinfo("اكتمل التجهيز", f"تم معالجة وتصدير {success_count} ملف إكسل بنجاح ودون أي تداخل!")
 
 root = Tk()
-root.title("معالج طلبيات الحلويات الذكي")
+root.title("معالج طلبيات الحلويات الدقيق")
 root.geometry("420x260")
 root.config(bg="#f5f5f5")
 
-label = Label(root, text="نظام التعرف والتسمية التلقائية للأقسام", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
+label = Label(root, text="نظام تنسيق وتصدير طلبيات المبيع", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
 label.pack(pady=25)
 
-desc_label = Label(root, text="يقرأ الملفات، يكتشف نوع القسم من المحتوى، ويسمي الملف تلقائياً", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
+desc_label = Label(root, text="يعالج كل ملف مستقل باسمه الأصلي ويضبط الأعمدة بدقة", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
 desc_label.pack(pady=5)
 
 btn = Button(root, text="اختيار ملفات الإكسل والبدء", command=process_excel_files, font=("Tahoma", 11, "bold"), bg="#1b5e20", fg="white", padx=15, pady=8)
