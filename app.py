@@ -1,162 +1,558 @@
+# Decompiled with PyLingual (https://pylingual.io)
+# Internal filename: 'main.py'
+# Bytecode version: 3.10.b1 (3439)
+# Source timestamp: 1970-01-01 00:00:00 UTC (0)
+
 import os
-import pandas as pd
-from tkinter import Tk, Label, Button, filedialog, messagebox
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+import sys
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import openpyxl
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+import subprocess
+import platform
 
-def process_excel_files():
-    file_paths = filedialog.askopenfilenames(
-        title="اختر ملفات الاكسل المطلوبة",
-        filetypes=[("Excel Files", "*.xlsx *.xls")]
-    )
-    if not file_paths:
-        return
-
-    output_dir = filedialog.askdirectory(title="اختر مجلد حفظ ملفات الإكسل المنسقة")
-    if not output_dir:
-        return
-
-    success_count = 0
-    for file_path in file_paths:
+def format_sales_orders_custom(input_path, output_path, selected_items, report_title, remove_empty=True):
+    wb_src = openpyxl.load_workbook(input_path, data_only=True)
+    ws_src = wb_src.active
+    header_row = 1
+    for r in range(1, min(10, ws_src.max_row + 1)):
+        row_vals = [str(ws_src.cell(row=r, column=c).value or '').strip() for c in range(1, ws_src.max_column + 1)]
+        if any((k in row_vals for k in ['المادة', 'تجهيز', 'اسم العميل'])):
+            header_row = r
+            break
+    col_item, col_client, col_qty = (3, 5, 6)
+    for c in range(1, ws_src.max_column + 1):
+        val = str(ws_src.cell(row=header_row, column=c).value or '').strip()
+        if val in ['المادة', 'اسم المادة']:
+            col_item = c
+        elif val in ['اسم العميل', 'العميل', 'المحل']:
+            col_client = c
+        elif val in ['تجهيز', 'الكمية', 'كمية']:
+            col_qty = c
+    wb_out = openpyxl.Workbook()
+    ws_out = wb_out.active
+    ws_out.title = report_title
+    ws_out.views.sheetView[0].rightToLeft = True
+    ws_out.append(['المادة', 'اسم العميل', 'الكمية'])
+    totals_per_item = {}
+    for r in range(header_row + 1, ws_src.max_row + 1):
+        qty_val = ws_src.cell(row=r, column=col_qty).value
+        if remove_empty and (qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']):
+                continue
+        item_val = str(ws_src.cell(row=r, column=col_item).value or '').strip()
+        client_val = ws_src.cell(row=r, column=col_client).value
+        if selected_items and item_val not in selected_items:
+                continue
         try:
-            original_filename = os.path.splitext(os.path.basename(file_path))[0]
-            
-            xls = pd.ExcelFile(file_path)
-            sheet_names = xls.sheet_names
-            target_sheet = sheet_names[0]
-            
-            # قراءة الملف بالكامل كجدول خام
-            df_raw = pd.read_excel(file_path, sheet_name=target_sheet, header=None)
-            
-            # البحث عن صف العنوان الحقيقي في الملف
-            header_row_idx = 0
-            for idx, row in df_raw.iterrows():
-                row_str = " ".join([str(val).lower() for val in row.values if pd.notna(val)])
-                if 'مادة' in row_str or 'الصنف' in row_str or 'كمية' in row_str or 'المطلوب' in row_str:
-                    header_row_idx = idx
-                    break
-            
-            # استخراج العناوين والبيانات بدقة
-            headers_row = df_raw.iloc[header_row_idx].values
-            df_data = df_raw.iloc[header_row_idx + 1:].copy()
-            
-            # تحديد أعمدة (المادة، العميل، الكمية) بمطابقة ذكية جداً للمحتوى والعناوين
-            mat_col, cust_col, qty_col = 0, 1, 2
-            
-            for i, h in enumerate(headers_row):
-                h_str = str(h).strip().lower()
-                if any(k in h_str for k in ['مادة', 'الصنف', 'المادة']):
-                    mat_col = i
-                elif any(k in h_str for k in ['عميل', 'العميل', 'جهة', 'محل']):
-                    cust_col = i
-                elif any(k in h_str for k in ['كمية', 'المطلوب', 'الطلب']):
-                    qty_col = i
-
-            wb = Workbook()
-            ws = wb.active
-            ws.title = original_filename[:31]
-            ws.sheet_view.rightToLeft = True
-            
-            # العنوان الرئيسي
-            ws.merge_cells('A1:C1')
-            ws['A1'] = f"قسم {original_filename}"
-            ws['A1'].font = Font(name='Tahoma', size=13, bold=True, color='FFFFFF')
-            ws['A1'].fill = PatternFill(start_color='333333', end_color='333333', fill_type='solid')
-            ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-            ws.row_dimensions[1].height = 25
-            
-            # العنوان الفرعي
-            ws.merge_cells('A2:C2')
-            ws['A2'] = "الحلويات الشرقية - طلبيات المبيع"
-            ws['A2'].font = Font(name='Tahoma', size=10, bold=True, color='333333')
-            ws['A2'].fill = PatternFill(start_color='EAEAEA', end_color='EAEAEA', fill_type='solid')
-            ws['A2'].alignment = Alignment(horizontal='center', vertical='center')
-            ws.row_dimensions[2].height = 20
-            
-            # رؤوس الأعمدة الثابتة
-            ws.append([])
-            headers = ['اسم المادة', 'اسم العميل', 'الكمية المطلوبة']
-            ws.append(headers)
-            
-            header_fill = PatternFill(start_color='D0D0D0', end_color='D0D0D0', fill_type='solid')
-            header_font = Font(name='Tahoma', size=11, bold=True)
-            thin_border = Border(
-                left=Side(style='thin', color='000000'),
-                right=Side(style='thin', color='000000'),
-                top=Side(style='thin', color='000000'),
-                bottom=Side(style='thin', color='000000')
-            )
-            
-            ws.row_dimensions[4].height = 22
-            for col_num in range(1, 4):
-                cell = ws.cell(row=4, column=col_num)
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(horizontal='center', vertical='center')
-                cell.border = thin_border
-            
-            # تصفية وتعبئة البيانات بطريقة ذكية تمنع انعكاس الأعمدة أو فراغها
-            row_idx = 5
-            for _, row in df_data.iterrows():
+            num_qty = float(qty_val)
+        except (ValueError, TypeError):
+            num_qty = 0.0
+        if isinstance(qty_val, float) and qty_val.is_integer():
+            qty_val = int(qty_val)
+        else:
+            if isinstance(qty_val, (int, float)):
+                pass
+            else:
                 try:
-                    val_mat = str(row.iloc[mat_col]).strip() if len(row) > mat_col and pd.notna(row.iloc[mat_col]) else ""
-                    val_cust = str(row.iloc[cust_col]).strip() if len(row) > cust_col and pd.notna(row.iloc[cust_col]) else ""
-                    val_qty = row.iloc[qty_col] if len(row) > qty_col and pd.notna(row.iloc[qty_col]) else ""
-                    
-                    # التصحيح التلقائي إذا انعكست البيانات (مثلاً القيم الرقمية دخلت في مكان العميل أو العكس)
-                    # إذا كانت قيمة العميل عبارة عن رقم صريح وقيمة الكمية نصية، نقوم بتبديلها تلقائياً
-                    try:
-                        float(val_cust)
-                        if not val_qty or str(val_qty) == 'nan':
-                            val_qty = val_cust
-                            val_cust = ""
-                    except ValueError:
-                        pass
-
-                    # استبعاد الصفوف الفارغ أو التي تحمل عناوين مكررة
-                    if val_mat and val_mat != 'nan' and 'اسم المادة' not in val_mat and 'المادة' not in val_mat:
-                        ws.append([val_mat, val_cust, val_qty])
-                        ws.row_dimensions[row_idx].height = 20
-                        
-                        for col_num in range(1, 4):
-                            c = ws.cell(row=row_idx, column=col_num)
-                            c.font = Font(name='Tahoma', size=10)
-                            c.alignment = Alignment(horizontal='center', vertical='center')
-                            c.border = thin_border
-                        row_idx += 1
+                    qty_val = int(num_qty) if num_qty.is_integer() else num_qty
                 except:
-                    continue
+                    pass
+        totals_per_item[item_val] = totals_per_item.get(item_val, 0) + num_qty
+        ws_out.append([item_val, client_val, qty_val])
+    ws_out.append([])
+    total_rows_start = ws_out.max_row + 1
+    for item, total in totals_per_item.items():
+        total_formatted = int(total) if total.is_integer() else round(total, 2)
+        ws_out.append([f'مجموع {item}', 'الإجمالي', total_formatted])
+    font_header = Font(name='Arial', size=12, bold=True, color='FFFFFF')
+    font_body = Font(name='Arial', size=11, bold=True, color='000000')
+    font_total = Font(name='Arial', size=12, bold=True, color='000000')
+    fill_header = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+    fill_zebra = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+    fill_total = PatternFill(start_color='E2E2E2', end_color='E2E2E2', fill_type='solid')
+    thin_side = Side(style='thin', color='000000')
+    double_side = Side(style='double', color='000000')
+    border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    border_total = Border(left=thin_side, right=thin_side, top=thin_side, bottom=double_side)
+    center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    ws_out.row_dimensions[1].height = 28
+    for r in range(1, ws_out.max_row + 1):
+        if r > 1:
+            ws_out.row_dimensions[r].height = 25
+        is_header = r == 1
+        is_total_row = r >= total_rows_start
+        if not is_header and ws_out.cell(row=r, column=1).value is None:
+                ws_out.row_dimensions[r].height = 10
+                continue
+        for c in range(1, 4):
+            cell = ws_out.cell(row=r, column=c)
+            cell.alignment = center_alignment
+            if is_header:
+                cell.font = font_header
+                cell.border = border_all
+                cell.fill = fill_header
+            else:
+                if is_total_row:
+                    cell.font = font_total
+                    cell.border = border_total
+                    cell.fill = fill_total
+                else:
+                    cell.font = font_body
+                    cell.border = border_all
+                    if r % 2 == 0:
+                        cell.fill = fill_zebra
+    ws_out.column_dimensions['A'].width = 18
+    ws_out.column_dimensions['B'].width = 18
+    ws_out.column_dimensions['C'].width = 8
+    ws_out.page_margins.left = ws_out.page_margins.right = 0.0
+    ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
+    ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
+    ws_out.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_out.page_setup.fitToWidth = 1
+    ws_out.page_setup.fitToHeight = 1
+    wb_out.save(output_path)
+
+def format_standard_two_column_sheet(input_path, output_path, report_title):
+    wb_src = openpyxl.load_workbook(input_path, data_only=True)
+    ws_src = wb_src.active
+    data = []
+    for row in ws_src.iter_rows(values_only=True):
+        if any(row):
+            valid_vals = [v for v in row if v is not None and str(v).strip() != '']
+            if len(valid_vals) >= 2:
+                item_name = valid_vals[0]
+                qty = valid_vals[(-1)]
+                data.append([item_name, qty])
+    wb_out = openpyxl.Workbook()
+    ws_out = wb_out.active
+    ws_out.title = report_title
+    ws_out.views.sheetView[0].rightToLeft = True
+    ws_out.merge_cells('A1:B1')
+    ws_out['A1'] = report_title
+    ws_out['A2'] = 'اسم المادة'
+    ws_out['B2'] = 'المطلوب'
+    for r in data:
+        item_name, qty = (r[0], r[1])
+        if item_name in ('اسم المادة', None) or str(item_name).strip() == '':
+            continue
+        else:
+            try:
+                val_float = float(qty)
+                formatted_qty = int(val_float) if val_float.is_integer() else round(val_float, 2)
+            except (ValueError, TypeError):
+                formatted_qty = qty
+            ws_out.append([item_name, formatted_qty])
+    font_title = Font(name='Arial', size=16, bold=True)
+    font_header = Font(name='Arial', size=14, bold=True, color='FFFFFF')
+    font_body = Font(name='Arial', size=13, bold=True)
+    fill_header = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+    fill_zebra = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+    thin_side = Side(style='thin', color='000000')
+    border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    ws_out.row_dimensions[1].height = 32
+    ws_out['A1'].font = font_title
+    ws_out['A1'].alignment = center_align
+    ws_out.row_dimensions[2].height = 28
+    for c in range(1, 3):
+        cell = ws_out.cell(row=2, column=c)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = center_align
+        cell.border = border_all
+    for r in range(3, ws_out.max_row + 1):
+        ws_out.row_dimensions[r].height = 26
+        for c in range(1, 3):
+            cell = ws_out.cell(row=r, column=c)
+            cell.font = font_body
+            cell.alignment = center_align
+            cell.border = border_all
+            if r % 2 == 1:
+                cell.fill = fill_zebra
+    ws_out.column_dimensions['A'].width = 28
+    ws_out.column_dimensions['B'].width = 15
+    ws_out.page_margins.left = ws_out.page_margins.right = 0.0
+    ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
+    ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
+    ws_out.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_out.page_setup.fitToWidth = 1
+    ws_out.page_setup.fitToHeight = 1
+    wb_out.save(output_path)
+
+def format_warehouses_split_report(input_path, base_output_dir, direct_print=False):
+    """
+    معالجة ملفات المستودعات وفصلها وتوجيهها إلى مجلدين مستقلين على سطح المكتب:
+    1. مجلد 'مستودع الجاهز'
+    2. مجلد 'مستودع المواد الأولية'
+    """
+    file_name = os.path.basename(input_path)
+    store_name = os.path.splitext(file_name)[0]
+    
+    wb_src = openpyxl.load_workbook(input_path, data_only=True)
+    ws_src = wb_src.active
+    rows = list(ws_src.iter_rows(values_only=True))
+    if not rows:
+        return 0
+        
+    col_item, col_qty, col_wh = (0, 1, 3)
+    
+    filtered_data_wh1 = []
+    filtered_data_wh3 = []
+    
+    for row in rows:
+        if len(row) <= max(col_item, col_qty, col_wh):
+            continue
+        item_val = row[col_item]
+        qty_val = row[col_qty]
+        wh_val = row[col_wh]
+        
+        if item_val is None or str(item_val).strip() == '' or str(item_val) == 'المادة':
+            continue
+        if qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']:
+            continue
             
-            for col in ws.columns:
-                max_len = 0
-                col_letter = get_column_letter(col[0].column)
-                for cell in col:
-                    if cell.row > 2 and cell.value:
-                        max_len = max(max_len, len(str(cell.value)))
-                ws.column_dimensions[col_letter].width = max(max_len + 5, 18)
-                
-            output_excel_path = os.path.join(output_dir, f"{original_filename}_المصحح.xlsx")
-            wb.save(output_excel_path)
-            success_count += 1
+        try:
+            wh_num = int(float(wh_val))
+        except (ValueError, TypeError):
+            continue
             
+        if wh_num == 2:
+            continue
+            
+        try:
+            f_qty = float(qty_val)
+            formatted_qty = int(f_qty) if f_qty.is_integer() else round(f_qty, 2)
+        except:
+            formatted_qty = qty_val
+            
+        unit_val = row[2] if len(row) > 2 and row[2] is not None else ''
+        item_record = [str(item_val), formatted_qty, str(unit_val)]
+        
+        if wh_num == 1:
+            filtered_data_wh1.append(item_record)
+        elif wh_num == 3:
+            filtered_data_wh3.append(item_record)
+            
+    processed_files_count = 0
+    
+    def save_to_warehouse_folder(sub_data, wh_title_suffix, folder_name):
+        if not sub_data:
+            return None
+        # إنشاء المجلد الفرعي على سطح المكتب (مستودع الجاهز / مستودع المواد الأولية)
+        target_dir = os.path.join(base_output_dir, folder_name)
+        os.makedirs(target_dir, exist_ok=True)
+        
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active
+        report_title = f"{store_name} - {wh_title_suffix}"
+        ws_out.title = wh_title_suffix
+        ws_out.views.sheetView[0].rightToLeft = True
+        
+        ws_out.merge_cells('A1:C1')
+        ws_out['A1'] = report_title
+        ws_out.append(['المادة', 'الكمية', 'الوحدة'])
+        
+        for r_data in sub_data:
+            ws_out.append(r_data)
+            
+        font_title = Font(name='Arial', size=14, bold=True)
+        font_header = Font(name='Arial', size=12, bold=True, color='FFFFFF')
+        font_body = Font(name='Arial', size=11, bold=True)
+        fill_header = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+        fill_zebra = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+        thin_side = Side(style='thin', color='000000')
+        border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        
+        ws_out.row_dimensions[1].height = 30
+        ws_out['A1'].font = font_title
+        ws_out['A1'].alignment = center_align
+        
+        ws_out.row_dimensions[2].height = 25
+        for c in range(1, 4):
+            cell = ws_out.cell(row=2, column=c)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = center_align
+            cell.border = border_all
+            
+        for r in range(3, ws_out.max_row + 1):
+            ws_out.row_dimensions[r].height = 24
+            for c in range(1, 4):
+                cell = ws_out.cell(row=r, column=c)
+                cell.font = font_body
+                cell.alignment = center_align
+                cell.border = border_all
+                if r % 2 == 1:
+                    cell.fill = fill_zebra
+                    
+        ws_out.column_dimensions['A'].width = 22
+        ws_out.column_dimensions['B'].width = 10
+        ws_out.column_dimensions['C'].width = 10
+        
+        ws_out.page_margins.left = ws_out.page_margins.right = 0.0
+        ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
+        ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
+        ws_out.sheet_properties.pageSetUpPr.fitToPage = True
+        ws_out.page_setup.fitToWidth = 1
+        ws_out.page_setup.fitToHeight = 1
+        
+        out_file_path = os.path.join(target_dir, f"{store_name}_{wh_title_suffix}.xlsx")
+        wb_out.save(out_file_path)
+        return out_file_path
+
+    # حفظ ملف المواد الأولية داخل مجلد 'مستودع المواد الأولية'
+    path_w1 = save_to_warehouse_folder(filtered_data_wh1, "مستودع المواد الأولية", "مستودع المواد الأولية")
+    if path_w1:
+        processed_files_count += 1
+        if direct_print:
+            print_excel_file(path_w1)
+            
+    # حفظ ملف الجاهز داخل مجلد 'مستودع الجاهز'
+    path_w3 = save_to_warehouse_folder(filtered_data_wh3, "مستودع الجاهز", "مستودع الجاهز")
+    if path_w3:
+        processed_files_count += 1
+        if direct_print:
+            print_excel_file(path_w3)
+            
+    return processed_files_count
+
+def print_excel_file(file_path):
+    try:
+        if platform.system() == 'Windows':
+            os.startfile(file_path, 'print')
+            return True
+        else:
+            subprocess.run(['lpr', file_path], check=True)
+            return True
+    except Exception as e:
+        return str(e)
+
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title('منسق طلبات الأمين الحراري الشامل (مع محول TXT)')
+        self.root.geometry('720x760')
+        self.root.resizable(False, False)
+        
+        self.current_files = []
+        self.txt_converter_files = []
+
+        lbl_title = tk.Label(root, text='منسق ملفات الأمين للطابعة الحرارية (8سم)', font=('Arial', 13, 'bold'))
+        lbl_title.pack(pady=5)
+
+        frame_controls = tk.LabelFrame(root, text='إعدادات ومعالجة التقارير الحرارية', font=('Arial', 10, 'bold'))
+        frame_controls.pack(fill='x', padx=15, pady=3)
+
+        frame_type = tk.Frame(frame_controls)
+        frame_type.pack(pady=5, fill='x', padx=10)
+        tk.Label(frame_type, text='نوع التقرير:', font=('Arial', 10, 'bold')).pack(side='right', padx=5)
+        
+        report_types = ['تعرّف تلقائي', 'المستودعات (مواد أولية وجاهز)', 'محلاية + خمس مواد', 'ورقة الفرن', 'هرايس بانواعها', 'مستودع الجاهز القديم']
+        self.file_type_var = tk.StringVar(value='تعرّف تلقائي')
+        self.combo_type = ttk.Combobox(frame_type, textvariable=self.file_type_var, values=report_types, state='readonly', font=('Arial', 10, 'bold'), width=25)
+        self.combo_type.pack(side='right', padx=5)
+
+        self.chk_var = tk.BooleanVar(value=True)
+        chk = tk.Checkbutton(frame_controls, text='حذف الصفوف فارغة/صفرية الكمية تلقائياً', variable=self.chk_var, font=('Arial', 9))
+        chk.pack(anchor='e', padx=15, pady=2)
+
+        self.direct_print_var = tk.BooleanVar(value=False)
+        chk_print = tk.Checkbutton(frame_controls, text='إرسال الملفات للطابعة الحرارية مباشرة بعد إنتاجها', variable=self.direct_print_var, font=('Arial', 9, 'bold'), fg='#d9534f')
+        chk_print.pack(anchor='e', padx=15, pady=2)
+
+        frame_btns = tk.Frame(root)
+        frame_btns.pack(pady=5)
+        btn_select = tk.Button(frame_btns, text='📂 اختر ملف أو عدة ملفات Excel', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=10, pady=5, command=self.load_files_dialog)
+        btn_select.pack(side='left', padx=5)
+
+        frame_preview = tk.LabelFrame(root, text='معاينة الملفات المختارة', font=('Arial', 9, 'bold'))
+        frame_preview.pack(fill='both', expand=True, padx=15, pady=3)
+
+        scroll_x = ttk.Scrollbar(frame_preview, orient='horizontal')
+        scroll_y = ttk.Scrollbar(frame_preview, orient='vertical')
+        self.tree = ttk.Treeview(frame_preview, show='headings', height=5, xscrollcommand=scroll_x.set, yscrollcommand=scroll_y.set)
+        scroll_x.config(command=self.tree.xview)
+        scroll_y.config(command=self.tree.yview)
+        scroll_x.pack(side='bottom', fill='x')
+        scroll_y.pack(side='left', fill='y')
+        self.tree.pack(fill='both', expand=True, padx=5, pady=5)
+
+        self.btn_process = tk.Button(root, text='⚡ معالجة واستخراج جميع الملفات إلى مجلدات سطح المكتب', font=('Arial', 11, 'bold'), bg='#28a745', fg='white', padx=15, pady=7, state='disabled', command=self.process_files)
+        self.btn_process.pack(pady=5)
+
+        frame_txt_tool = tk.LabelFrame(root, text='أداة محول ملفات Excel إلى TXT (Unicode)', font=('Arial', 10, 'bold'), fg='#0056b3')
+        frame_txt_tool.pack(fill='x', padx=15, pady=5)
+
+        self.lbl_txt_status = tk.Label(frame_txt_tool, text='لم يتم اختيار أي ملف للتحويل', font=('Arial', 9), fg='gray')
+        self.lbl_txt_status.pack(pady=2)
+
+        frame_txt_btns = tk.Frame(frame_txt_tool)
+        frame_txt_btns.pack(pady=5)
+
+        btn_txt_select = tk.Button(frame_txt_btns, text='📂 (واحدة أو أكثر) Excel اختر ملفات', font=('Arial', 10, 'bold'), bg='#28a745', fg='white', padx=10, pady=5, command=self.load_txt_files_dialog)
+        btn_txt_select.pack(side='left', padx=5)
+
+        self.btn_txt_convert = tk.Button(frame_txt_btns, text='🔄 TXT (Unicode) تحويل الملفات إلى', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=10, pady=5, state='disabled', command=self.convert_to_txt_files)
+        self.btn_txt_convert.pack(side='left', padx=5)
+
+    def load_files_dialog(self):
+        file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
+        if not file_paths:
+            return
+        self.handle_loaded_files(list(file_paths))
+
+    def handle_loaded_files(self, file_paths):
+        self.current_files = file_paths
+        self.preview_files(file_paths)
+        if len(file_paths) == 1:
+            detected = self.auto_detect_type(file_paths[0])
+            self.file_type_var.set(detected)
+        else:
+            self.file_type_var.set('تعرّف تلقائي')
+        self.btn_process.config(state='normal')
+
+    def auto_detect_type(self, file_path):
+        try:
+            filename = os.path.basename(file_path).lower()
+            if 'هرايس' in filename or 'harees' in filename:
+                return 'هرايس بانواعها'
+            elif 'مستودع' in filename or 'جاهز' in filename or 'warehouse' in filename:
+                return 'المستودعات (مواد أولية وجاهز)'
+            elif 'فرن' in filename or 'oven' in filename:
+                return 'ورقة الفرن'
+            elif 'مبيع' in filename or 'طلبات' in filename or 'محلاية' in filename:
+                return 'محلاية + خمس مواد'
+            else:
+                return 'المستودعات (مواد أولية وجاهز)'
+        except Exception:
+            return 'المستودعات (مواد أولية وجاهز)'
+
+    def preview_files(self, file_paths):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        try:
+            first_file = file_paths[0]
+            wb = openpyxl.load_workbook(first_file, data_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                return
+            header_row = rows[0]
+            cols = [f'col_{i}' for i in range(len(header_row))]
+            self.tree['columns'] = cols
+            for i, col_name in enumerate(header_row):
+                header_text = str(col_name) if col_name is not None else f'عمود {i + 1}'
+                self.tree.heading(f'col_{i}', text=header_text)
+                self.tree.column(f'col_{i}', width=100, anchor='center')
+            for row in rows[1:6]:
+                self.tree.insert('', 'end', values=[str(v) if v is not None else '' for v in row])
         except Exception as e:
-            print(f"خطأ في معالجة الملف {file_path}: {e}")
+            messagebox.showerror('خطأ', f'تعذر معاينة الملف:\n{str(e)}')
+
+    def process_files(self):
+        if not self.current_files:
+            return
+        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+        direct_print = self.direct_print_var.get()
+        processed_count = 0
+        manual_type = self.file_type_var.get()
+        
+        for file_path in self.current_files:
+            if manual_type != 'تعرّف تلقائي':
+                detected_type = manual_type
+            else:
+                detected_type = self.auto_detect_type(file_path)
             
-    messagebox.showinfo("اكتمل التجهيز", f"تم معالجة وتصحيح {success_count} ملف إكسل بنجاح تام!")
+            if detected_type == 'المستودعات (مواد أولية وجاهز)':
+                try:
+                    count = format_warehouses_split_report(file_path, desktop_path, direct_print)
+                    processed_count += count
+                except Exception as e:
+                    continue
+            elif detected_type in ['ورقة الفرن', 'هرايس بانواعها', 'مستودع الجاهز القديم']:
+                try:
+                    legacy_dir = os.path.join(desktop_path, 'جاهز للطباعه')
+                    os.makedirs(legacy_dir, exist_ok=True)
+                    if detected_type == 'هرايس بانواعها':
+                        out_name = 'جاهز_للطباعة_هرايس.xlsx'
+                    elif detected_type == 'مستودع الجاهز القديم':
+                        out_name = 'جاهز_للطباعة_مستودع_الجاهز.xlsx'
+                    else:
+                        out_name = 'جاهز_للطباعة_ورقة_الفرن.xlsx'
+                    
+                    save_path = os.path.join(legacy_dir, out_name)
+                    format_standard_two_column_sheet(file_path, save_path, detected_type)
+                    if direct_print:
+                        print_excel_file(save_path)
+                    processed_count += 1
+                except Exception:
+                    continue
+            else:
+                if detected_type == 'محلاية + خمس مواد':
+                    try:
+                        legacy_dir = os.path.join(desktop_path, 'جاهز للطباعه')
+                        os.makedirs(legacy_dir, exist_ok=True)
+                        path_both = os.path.join(legacy_dir, 'جاهز_للطباعة_محلاية_وغريبة.xlsx')
+                        format_sales_orders_custom(file_path, path_both, selected_items=['محلاية', 'غريبة بالقشطة'], report_title='محلاية + غريبة', remove_empty=self.chk_var.get())
+                        if direct_print:
+                            print_excel_file(path_both)
+                        
+                        five_items_set = {'كنافة ناعمة', 'غاز سائل كبير', 'كريمة', 'عش لحمة نية', 'عش البلبل فستق نية'}
+                        path_five = os.path.join(legacy_dir, 'جاهز_للطباعة_خمس_مواد.xlsx')
+                        format_sales_orders_custom(file_path, path_five, selected_items=five_items_set, report_title='خمس مواد', remove_empty=self.chk_var.get())
+                        if direct_print:
+                            print_excel_file(path_five)
+                        processed_count += 2
+                    except Exception:
+                        pass
+                        
+        msg = f'تمت معالجة وإخراج جميع الملفات بنجاح تام ({processed_count} ورقة)!\n\nتم تنظيمها وتوزيعها تلقائياً على مجلدين على سطح المكتب:\n- مجلد (مستودع الجاهز)\n- مجلد (مستودع المواد الأولية)'
+        if direct_print:
+            msg += '\nوتم إرسالها للطباعة المباشرة على الطابعة الحرارية.'
+        messagebox.showinfo('نجاح تام', msg)
 
-root = Tk()
-root.title("معالج طلبيات الحلويات المحترف")
-root.geometry("420x260")
-root.config(bg="#f5f5f5")
+    def load_txt_files_dialog(self):
+        file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
+        if not file_paths:
+            return
+        self.txt_converter_files = list(file_paths)
+        self.lbl_txt_status.config(text=f'تم اختيار {len(self.txt_converter_files)} ملف للتحويل', fg='green')
+        self.btn_txt_convert.config(state='normal')
 
-label = Label(root, text="نظام تصحيح وتنسيق طلبيات المبيع", font=("Tahoma", 12, "bold"), bg="#f5f5f5")
-label.pack(pady=25)
+    def convert_to_txt_files(self):
+        if not self.txt_converter_files:
+            return
+        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+        output_dir = os.path.join(desktop_path, 'ملفات_TXT_الأمين')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        success_count = 0
+        try:
+            for file_path in self.txt_converter_files:
+                wb = openpyxl.load_workbook(file_path, data_only=True)
+                ws = wb.active
+                
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                out_txt_path = os.path.join(output_dir, f'{base_name}.txt')
+                
+                with open(out_txt_path, 'w', encoding='utf-16') as f:
+                    for row in ws.iter_rows(values_only=True):
+                        if any(row):
+                            row_vals = [str(v) if v is not None else '' for v in row]
+                            f.write('\t'.join(row_vals) + '\n')
+                            
+                success_count += 1
+                
+            messagebox.showinfo('نجاح التحويل', f'تم تحويل {success_count} ملف بنجاح!\nموجودة الآن في مجلد (ملفات_TXT_الأمين) على سطح المكتب.')
+            self.lbl_txt_status.config(text='لم يتم اختيار أي ملف للتحويل', fg='gray')
+            self.txt_converter_files = []
+            self.btn_txt_convert.config(state='disabled')
+        except Exception as e:
+            messagebox.showerror('خطأ في التحويل', f'حدث خطأ أثناء معالجة الملفات:\n{str(e)}')
 
-desc_label = Label(root, text="يصحح الأعمدة المعكوسة والبيانات الفارغة تلقائياً", font=("Tahoma", 8), bg="#f5f5f5", fg="#555")
-desc_label.pack(pady=5)
-
-btn = Button(root, text="اختيار ملفات الإكسل والبدء", command=process_excel_files, font=("Tahoma", 11, "bold"), bg="#1b5e20", fg="white", padx=15, pady=8)
-btn.pack(pady=20)
-
-root.mainloop()
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
