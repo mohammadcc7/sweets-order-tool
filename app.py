@@ -6,7 +6,24 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 import subprocess
 import platform
-import pandas as pd
+import re
+
+# دالة لتنظيف واستخراج اسم المحل فقط وتجاهل كلمات مثل (طلبات، طلب، طلبية)
+def extract_clean_store_name(filename):
+    # إزالة اللاحقة مثل .xlsx أو .xls
+    base = os.path.splitext(os.path.basename(filename))[0]
+    # قائمة الكلمات الزائدة التي نريد تنظيفها من اسم الملف
+    stop_words = ['طلبات', 'طلب', 'طلبية', 'مجمع', 'ضاحية']
+    
+    # تنظيف النص وإزالة المسافات الزائدة
+    words = base.split()
+    clean_words = [w for w in words if w not in stop_words]
+    
+    # إذا بقي شيء، ندمجه، وإلا نترك الاسم الأساسي
+    cleaned = ' '.join(clean_words).strip()
+    if not cleaned:
+        cleaned = base
+    return cleaned
 
 def format_sales_orders_custom(input_path, output_path, selected_items, report_title, remove_empty=True):
     wb_src = openpyxl.load_workbook(input_path, data_only=True)
@@ -46,16 +63,6 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
             num_qty = float(qty_val)
         except (ValueError, TypeError):
             num_qty = 0.0
-        if isinstance(qty_val, float) and qty_val.is_integer():
-            qty_val = int(qty_val)
-        else:
-            if isinstance(qty_val, (int, float)):
-                pass
-            else:
-                try:
-                    qty_val = int(num_qty) if num_qty.is_integer() else num_qty
-                except:
-                    pass
         totals_per_item[item_val] = totals_per_item.get(item_val, 0) + num_qty
         ws_out.append([item_val, client_val, qty_val])
     ws_out.append([])
@@ -141,7 +148,7 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
             except (ValueError, TypeError):
                 formatted_qty = qty
             ws_out.append([item_name, formatted_qty])
-    font_title = Font(name='Arial', size=16, bold=True)
+    font_title = Font(name='Arial', size=14, bold=True)
     font_header = Font(name='Arial', size=14, bold=True, color='FFFFFF')
     font_body = Font(name='Arial', size=13, bold=True)
     fill_header = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
@@ -178,20 +185,25 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
     ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
 
-# --- دالة مخصصة لتنسيق ملفات المستودعات المقسمة (بنفس نسق ورقة الفرن القياسي) ---
-def format_warehouse_sheet(rows_data, output_path, report_title):
+# --- دالة مخصصة لفرز المستودعات (مع العنوان من سطرين وتصفية اسم المحل) ---
+def format_warehouse_sheet_two_lines(rows_data, output_path, store_name, subtitle_type):
     wb_out = openpyxl.Workbook()
     ws_out = wb_out.active
-    ws_out.title = report_title
+    ws_out.title = subtitle_type
     ws_out.views.sheetView[0].rightToLeft = True
     
+    # دمج الخلايا A1 و B1 لسطر اسم المحل، و A2 و B2 للنوع (مواد أولية أو الحلو العربي)
+    # أو يمكننا وضع العنوان كسطرين داخل الخلية المدمجة A1:B1 مع تفعيل التفاف النص (wrap_text)
     ws_out.merge_cells('A1:B1')
-    ws_out['A1'] = report_title
-    ws_out['A2'] = 'اسم المادة'
-    ws_out['B2'] = 'المطلوب'
+    ws_out.merge_cells('A2:B2')
+    
+    ws_out['A1'] = f"محل {store_name}"
+    ws_out['A2'] = subtitle_type
+    
+    ws_out['A3'] = 'اسم المادة'
+    ws_out['B3'] = 'المطلوب'
     
     for r in rows_data:
-        # r[0] هو اسم المادة، r[1] هي الكمية (عمود B)
         item_name = r[0]
         qty = r[1]
         try:
@@ -201,7 +213,8 @@ def format_warehouse_sheet(rows_data, output_path, report_title):
             formatted_qty = qty
         ws_out.append([item_name, formatted_qty])
         
-    font_title = Font(name='Arial', size=16, bold=True)
+    font_title1 = Font(name='Arial', size=15, bold=True)
+    font_title2 = Font(name='Arial', size=14, bold=True)
     font_header = Font(name='Arial', size=14, bold=True, color='FFFFFF')
     font_body = Font(name='Arial', size=13, bold=True)
     fill_header = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
@@ -210,26 +223,31 @@ def format_warehouse_sheet(rows_data, output_path, report_title):
     border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     
-    ws_out.row_dimensions[1].height = 32
-    ws_out['A1'].font = font_title
+    # ارتفاعات السطور العلوية للعناوين
+    ws_out.row_dimensions[1].height = 25
+    ws_out['A1'].font = font_title1
     ws_out['A1'].alignment = center_align
     
-    ws_out.row_dimensions[2].height = 28
+    ws_out.row_dimensions[2].height = 25
+    ws_out['A2'].font = font_title2
+    ws_out['A2'].alignment = center_align
+    
+    ws_out.row_dimensions[3].height = 28
     for c in range(1, 3):
-        cell = ws_out.cell(row=2, column=c)
+        cell = ws_out.cell(row=3, column=c)
         cell.font = font_header
         cell.fill = fill_header
         cell.alignment = center_align
         cell.border = border_all
         
-    for r in range(3, ws_out.max_row + 1):
+    for r in range(4, ws_out.max_row + 1):
         ws_out.row_dimensions[r].height = 26
         for c in range(1, 3):
             cell = ws_out.cell(row=r, column=c)
             cell.font = font_body
             cell.alignment = center_align
             cell.border = border_all
-            if r % 2 == 1:
+            if r % 2 == 0:  # تبديل الألوان (Zebra) بدءاً من صف البيانات الأول
                 cell.fill = fill_zebra
                 
     ws_out.column_dimensions['A'].width = 28
@@ -445,7 +463,7 @@ class App:
             msg += '\nوتم إرسالها للطباعة المباشرة على الطابعة الحرارية.'
         messagebox.showinfo('نجاح تام', msg)
 
-    # --- دالة فرز المستودعات (1 و 3) مع فلترة الكميات وتطبيق التنسيق القياسي للطباعة ---
+    # --- دالة فرز المستودعات (مع تطبيق أسماء المحلات النظيفة والعنوان السطري المزدوج) ---
     def process_warehouses_files(self):
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
         if not file_paths:
@@ -465,7 +483,8 @@ class App:
                 wb_src = openpyxl.load_workbook(file_path, data_only=True)
                 ws_src = wb_src.active
                 
-                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                # استخراج اسم المحل النظيف (بدون كلمة طلبات أو طلب)
+                clean_store = extract_clean_store_name(file_path)
                 
                 raw_rows = []
                 ready_rows = []
@@ -474,7 +493,6 @@ class App:
                     if not any(row):
                         continue
                     
-                    # 1. التحقق من الكمية في عمود B (الفهرس 1): إذا كانت فارغة أو صفر، نستبعد السطر
                     qty_val = row[1] if len(row) > 1 else None
                     if qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']:
                         continue
@@ -485,7 +503,6 @@ class App:
                     except:
                         continue
 
-                    # 2. التحقق من رقم المستودع في العمود D (الفهرس 3)
                     if len(row) >= 4:
                         wh_val = row[3]
                         try:
@@ -493,7 +510,6 @@ class App:
                         except:
                             wh_int = 0
                         
-                        # نأخذ اسم المادة (عمود A الفهرس 0) والكمية (عمود B الفهرس 1)
                         item_name = row[0]
                         if item_name is None or str(item_name).strip() == '':
                             continue
@@ -505,17 +521,27 @@ class App:
                         elif wh_int == 3:
                             ready_rows.append(item_data)
                 
-                # حفظ مستودع المواد الأولية (رقم 1) بالتنسيق الاحترافي
+                # حفظ مستودع المواد الأولية (رقم 1) بالعنوان المزدوج
                 if raw_rows:
-                    format_warehouse_sheet(raw_rows, os.path.join(raw_dir, f'{base_name}_أولية.xlsx'), 'المواد الأولية')
+                    format_warehouse_sheet_two_lines(
+                        raw_rows, 
+                        os.path.join(raw_dir, f'{clean_store}_أولية.xlsx'), 
+                        clean_store, 
+                        'مواد أولية'
+                    )
                 
-                # حفظ مستودع الجاهز (رقم 3) بالتنسيق الاحترافي
+                # حفظ مستودع الجاهز (رقم 3) بالعنوان المزدوج
                 if ready_rows:
-                    format_warehouse_sheet(ready_rows, os.path.join(ready_dir, f'{base_name}_جاهز.xlsx'), 'مستودع الجاهز')
+                    format_warehouse_sheet_two_lines(
+                        ready_rows, 
+                        os.path.join(ready_dir, f'{clean_store}_جاهز.xlsx'), 
+                        clean_store, 
+                        'الحلو العربي'
+                    )
                 
                 processed_count += 1
                 
-            messagebox.showinfo('نجاح الفرز', f'تمت معالجة وفرز {processed_count} ملف بنجاح (مع فلترة الكميات وتطبيق التنسيق القياسي للطباعة)!\nالمجلدات موجودة على سطح المكتب داخل (فرز_المستودعات).')
+            messagebox.showinfo('نجاح الفرز', f'تمت معالجة وفرز {processed_count} ملف بنجاح (مع تصفية أسماء المحلات وتطبيق العنوان من سطرين)!\nالمجلدات موجودة على سطح المكتب داخل (فرز_المستودعات).')
         except Exception as e:
             messagebox.showerror('خطأ', f'حدث خطأ أثناء معالجة المستودعات:\n{str(e)}')
 
