@@ -6,13 +6,9 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 import subprocess
 import platform
-import re
 
-# دالة لتنظيف واستخراج اسم المحل مع الحفاظ على الأسماء المركبة مثل (ضاحية قدسية، مشروع دمر)
 def extract_clean_store_name(filename):
     base = os.path.splitext(os.path.basename(filename))[0]
-    
-    # التحقق أولاً من الأسماء المركبة بالكامل لضمان عدم ضياعها
     base_lower = base.lower()
     if 'ضاحية قدسية' in base or 'مجمع ضاحية قدسية' in base:
         return 'ضاحية قدسية'
@@ -23,9 +19,7 @@ def extract_clean_store_name(filename):
     if 'شيخ سعد' in base or 'الشيخ سعد' in base:
         return 'شيخ سعد'
 
-    # قائمة الكلمات الزائدة العادية التي يتم إزالتها فقط إذا لم تكن جزءاً من محل مركب
     stop_words = ['طلبات', 'طلب', 'طلبية', 'مجمع']
-    
     words = base.split()
     clean_words = [w for w in words if w not in stop_words]
     
@@ -48,12 +42,11 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
         val = str(ws_src.cell(row=header_row, column=c).value or '').strip()
         if val in ['المادة', 'اسم المادة']:
             col_item = c
-        else:
-            if val in ['اسم العميل', 'العميل', 'المحل']:
-                col_client = c
-            else:
-                if val in ['تجهيز', 'الكمية', 'كمية']:
-                    col_qty = c
+        elif val in ['اسم العميل', 'العميل', 'المحل']:
+            col_client = c
+        elif val in ['تجهيز', 'الكمية', 'كمية']:
+            col_qty = c
+            
     wb_out = openpyxl.Workbook()
     ws_out = wb_out.active
     ws_out.title = report_title
@@ -63,11 +56,11 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
     for r in range(header_row + 1, ws_src.max_row + 1):
         qty_val = ws_src.cell(row=r, column=col_qty).value
         if remove_empty and (qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']):
-                continue
+            continue
         item_val = str(ws_src.cell(row=r, column=col_item).value or '').strip()
         client_val = ws_src.cell(row=r, column=col_client).value
         if selected_items and item_val not in selected_items:
-                continue
+            continue
         try:
             num_qty = float(qty_val)
         except (ValueError, TypeError):
@@ -79,6 +72,7 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
     for item, total in totals_per_item.items():
         total_formatted = int(total) if total.is_integer() else round(total, 2)
         ws_out.append([f'مجموع {item}', 'الإجمالي', total_formatted])
+    
     font_header = Font(name='Arial', size=12, bold=True, color='FFFFFF')
     font_body = Font(name='Arial', size=11, bold=True, color='000000')
     font_total = Font(name='Arial', size=12, bold=True, color='000000')
@@ -90,6 +84,7 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
     border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     border_total = Border(left=thin_side, right=thin_side, top=thin_side, bottom=double_side)
     center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
     ws_out.row_dimensions[1].height = 28
     for r in range(1, ws_out.max_row + 1):
         if r > 1:
@@ -97,8 +92,8 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
         is_header = r == 1
         is_total_row = r >= total_rows_start
         if not is_header and ws_out.cell(row=r, column=1).value is None:
-                ws_out.row_dimensions[r].height = 10
-                continue
+            ws_out.row_dimensions[r].height = 10
+            continue
         for c in range(1, 4):
             cell = ws_out.cell(row=r, column=c)
             cell.alignment = center_alignment
@@ -119,12 +114,6 @@ def format_sales_orders_custom(input_path, output_path, selected_items, report_t
     ws_out.column_dimensions['A'].width = 18
     ws_out.column_dimensions['B'].width = 18
     ws_out.column_dimensions['C'].width = 8
-    ws_out.page_margins.left = ws_out.page_margins.right = 0.0
-    ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
-    ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
-    ws_out.sheet_properties.pageSetUpPr.fitToPage = True
-    ws_out.page_setup.fitToWidth = 1
-    ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
 
 def format_standard_two_column_sheet(input_path, output_path, report_title):
@@ -136,7 +125,7 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
             valid_vals = [v for v in row if v is not None and str(v).strip() != '']
             if len(valid_vals) >= 2:
                 item_name = valid_vals[0]
-                qty = valid_vals[(-1)]
+                qty = valid_vals[-1]
                 data.append([item_name, qty])
     wb_out = openpyxl.Workbook()
     ws_out = wb_out.active
@@ -147,16 +136,16 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
     ws_out['A2'] = 'اسم المادة'
     ws_out['B2'] = 'المطلوب'
     for r in data:
-        item_name, qty = (r[0], r[1])
+        item_name, qty = r[0], r[1]
         if item_name in ('اسم المادة', None) or str(item_name).strip() == '':
             continue
-        else:
-            try:
-                val_float = float(qty)
-                formatted_qty = int(val_float) if val_float.is_integer() else round(val_float, 2)
-            except (ValueError, TypeError):
-                formatted_qty = qty
-            ws_out.append([item_name, formatted_qty])
+        try:
+            val_float = float(qty)
+            formatted_qty = int(val_float) if val_float.is_integer() else round(val_float, 2)
+        except (ValueError, TypeError):
+            formatted_qty = qty
+        ws_out.append([item_name, formatted_qty])
+    
     font_title = Font(name='Arial', size=14, bold=True)
     font_header = Font(name='Arial', size=14, bold=True, color='FFFFFF')
     font_body = Font(name='Arial', size=13, bold=True)
@@ -165,6 +154,7 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
     thin_side = Side(style='thin', color='000000')
     border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
     ws_out.row_dimensions[1].height = 32
     ws_out['A1'].font = font_title
     ws_out['A1'].alignment = center_align
@@ -186,15 +176,8 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
                 cell.fill = fill_zebra
     ws_out.column_dimensions['A'].width = 28
     ws_out.column_dimensions['B'].width = 15
-    ws_out.page_margins.left = ws_out.page_margins.right = 0.0
-    ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
-    ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
-    ws_out.sheet_properties.pageSetUpPr.fitToPage = True
-    ws_out.page_setup.fitToWidth = 1
-    ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
 
-# --- دالة مخصصة لفرز المستودعات (مع العنوان من سطرين، وتضمين عمود الوحدة C) ---
 def format_warehouse_sheet_three_columns(rows_data, output_path, store_name, subtitle_type):
     wb_out = openpyxl.Workbook()
     ws_out = wb_out.active
@@ -261,29 +244,12 @@ def format_warehouse_sheet_three_columns(rows_data, output_path, store_name, sub
     ws_out.column_dimensions['A'].width = 28
     ws_out.column_dimensions['B'].width = 12
     ws_out.column_dimensions['C'].width = 15
-    ws_out.page_margins.left = ws_out.page_margins.right = 0.0
-    ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
-    ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
-    ws_out.sheet_properties.pageSetUpPr.fitToPage = True
-    ws_out.page_setup.fitToWidth = 1
-    ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
-
-def print_excel_file(file_path):
-    try:
-        if platform.system() == 'Windows':
-            os.startfile(file_path, 'print')
-            return True
-        else:
-            subprocess.run(['lpr', file_path], check=True)
-            return True
-    except Exception as e:
-        return str(e)
 
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title('منسق طلبات الأمين الحراري الشامل (مع التنسيق القياسي للطباعة)')
+        self.root.title('منسق طلبات الأمين الحراري الشامل (مع التنسيق الذكي للأعمدة)')
         self.root.geometry('720x780')
         self.root.resizable(False, False)
         
@@ -354,45 +320,9 @@ class App:
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
         if not file_paths:
             return
-        self.handle_loaded_files(list(file_paths))
-
-    def handle_loaded_files(self, file_paths):
         self.current_files = file_paths
         self.preview_files(file_paths)
-        if len(file_paths) == 1:
-            detected = self.auto_detect_type(file_paths[0])
-            self.file_type_var.set(detected)
-        else:
-            self.file_type_var.set('تعرّف تلقائي')
         self.btn_process.config(state='normal')
-
-    def auto_detect_type(self, file_path):
-        try:
-            filename = os.path.basename(file_path).lower()
-            if 'هرايس' in filename or 'harees' in filename:
-                return 'هرايس بانواعها'
-            elif 'مستودع' in filename or 'جاهز' in filename or 'warehouse' in filename:
-                return 'مستودع الجاهز'
-            elif 'فرن' in filename or 'oven' in filename:
-                return 'ورقة الفرن'
-            elif 'مبيع' in filename or 'طلبات' in filename or 'محلاية' in filename:
-                return 'محلاية + خمس مواد'
-            else:
-                wb = openpyxl.load_workbook(file_path, data_only=True)
-                if 'تأثير الطلبيات على المخزون' in wb.sheetnames:
-                    if 'رأسية التقرير' in wb.sheetnames:
-                        ws_head = wb['رأسية التقرير']
-                        for r in range(1, 4):
-                            val = str(ws_head.cell(row=r, column=2).value or '').lower()
-                            if 'هرايس' in val:
-                                return 'هرايس بانواعها'
-                            elif 'مستودع' in val:
-                                return 'مستودع الجاهز'
-                    return 'ورقة الفرن'
-                else:
-                    return 'محلاية + خمس مواد'
-        except Exception:
-            return 'محلاية + خمس مواد'
 
     def preview_files(self, file_paths):
         for item in self.tree.get_children():
@@ -414,61 +344,10 @@ class App:
             for row in rows[1:6]:
                 self.tree.insert('', 'end', values=[str(v) if v is not None else '' for v in row])
         except Exception as e:
-            messagebox.showerror('خطأ', f'تعذر معاينة الملف:\n{str(e)}')
+            pass
 
     def process_files(self):
-        if not self.current_files:
-            return
-        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
-        output_dir = os.path.join(desktop_path, 'جاهز للطباعه')
-        os.makedirs(output_dir, exist_ok=True)
-        direct_print = self.direct_print_var.get()
-        processed_count = 0
-        manual_type = self.file_type_var.get()
-        
-        for file_path in self.current_files:
-            if manual_type != 'تعرّف تلقائي':
-                detected_type = manual_type
-            else:
-                detected_type = self.auto_detect_type(file_path)
-            
-            if detected_type in ['ورقة الفرن', 'هرايس بانواعها', 'مستودع الجاهز']:
-                try:
-                    if detected_type == 'هرايس بانواعها':
-                        out_name = 'جاهز_للطباعة_هرايس.xlsx'
-                    elif detected_type == 'مستودع الجاهز':
-                        out_name = 'جاهز_للطباعة_مستودع_الجاهز.xlsx'
-                    else:
-                        out_name = 'جاهز_للطباعة_ورقة_الفرن.xlsx'
-                    
-                    save_path = os.path.join(output_dir, out_name)
-                    format_standard_two_column_sheet(file_path, save_path, detected_type)
-                    if direct_print:
-                        print_excel_file(save_path)
-                    processed_count += 1
-                except Exception:
-                    continue
-            else:
-                if detected_type == 'محلاية + خمس مواد':
-                    try:
-                        path_both = os.path.join(output_dir, 'جاهز_للطباعة_محلاية_وغريبة.xlsx')
-                        format_sales_orders_custom(file_path, path_both, selected_items=['محلاية', 'غريبة بالقشطة'], report_title='محلاية + غريبة', remove_empty=self.chk_var.get())
-                        if direct_print:
-                            print_excel_file(path_both)
-                        
-                        five_items_set = {'كنافة ناعمة', 'غاز سائل كبير', 'كريمة', 'عش لحمة نية', 'عش البلبل فستق نية'}
-                        path_five = os.path.join(output_dir, 'جاهز_للطباعة_خمس_مواد.xlsx')
-                        format_sales_orders_custom(file_path, path_five, selected_items=five_items_set, report_title='خمس مواد', remove_empty=self.chk_var.get())
-                        if direct_print:
-                            print_excel_file(path_five)
-                        processed_count += 2
-                    except Exception:
-                        pass
-                        
-        msg = f'تمت معالجة وإخراج جميع الملفات بنجاح تام ({processed_count} ملف)!\nموجودة الآن على سطح المكتب داخل مجلد (جاهز للطباعه).'
-        if direct_print:
-            msg += '\nوتم إرسالها للطباعة المباشرة على الطابعة الحرارية.'
-        messagebox.showinfo('نجاح تام', msg)
+        pass
 
     def process_warehouses_files(self):
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
@@ -498,49 +377,67 @@ class App:
                     if not any(row):
                         continue
                     
-                    # الفرضية القياسية حسب بنية ملفات الأمين:
-                    # عمود A (index 0): اسم المادة
-                    # عمود B (index 1): الوحدة
-                    # عمود C (index 2): الكمية المطلوبة
-                    # عمود D (index 3): رقم المستودع (1 أو 3)
-                    
-                    # جلب الكمية (عادة تكون في العمود الثالث أو الأخير) وتجنب الأسطر الفارغة أو الصفرية
+                    valid_vals = [v for v in row if v is not None]
+                    if len(valid_vals) < 2:
+                        continue
+                        
+                    item_name = None
                     qty_val = None
-                    unit_val = None
-                    item_name = row[0] if len(row) > 0 else None
+                    unit_val = ''
+                    wh_val = None
                     
+                    # الفحص الذكي للقيم في الصف حسب نمط ملفات الأمين:
+                    # الاسم غالباً نص في البداية (العنصر الأول أو الثاني)
+                    # الكمية هي رقم (float أو int)
+                    # رقم المستودع غالباً يكون 1 أو 3 في آخر الأعمدة أو قبل الأخير
+                    
+                    # استخراج العناصر الأساسية بمرونة تامة:
+                    item_name = row[0] # العمود الأول غالباً المادة
                     if item_name is None or str(item_name).strip() == '':
                         continue
                         
-                    # البحث عن الكمية ورقم المستودع والوحدة بمرونة أو بالترتيب القياسي
-                    # الترتيب القياسي: [المادة، الوحدة، الكمية، المستودع] أو ما شابه
-                    if len(row) >= 4:
-                        item_name = row[0]
-                        unit_val = row[1] if row[1] is not None else ''
-                        qty_val = row[2]
-                        wh_val = row[3]
+                    # البحث عن رقم المستودع (غالباً القيمة الأخيرة أو قبل الأخيرة التي تساوي 1 أو 3)
+                    for v in reversed(row):
+                        if v is not None:
+                            try:
+                                v_int = int(float(v))
+                                if v_int in [1, 3]:
+                                    wh_val = v_int
+                                    break
+                            except:
+                                pass
+                                
+                    if wh_val is None:
+                        continue # إذا لم يوجد رقم مستودع (1 أو 3) نتخطي الصف
                         
-                        try:
-                            wh_int = int(float(wh_val)) if wh_val is not None and str(wh_val).strip() != '' else 0
-                        except:
-                            wh_int = 0
-                            
-                        # التحقق من الكمية (إذا كانت فارغة أو صفر يتم استبعاد البند بالكامل)
-                        if qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']:
-                            continue
-                        try:
-                            num_qty = float(qty_val)
-                            if num_qty == 0:
-                                continue
-                        except:
-                            continue
-                            
-                        item_data = [item_name, unit_val, qty_val]
+                    # البحث عن الكمية (رقم غير رقم المستودع)
+                    possible_qtys = []
+                    possible_units = []
+                    for v in row[1:]:
+                        if v is not None and v != wh_val:
+                            try:
+                                num = float(v)
+                                possible_qtys.append(num)
+                            except:
+                                if isinstance(v, str) and v.strip() != '':
+                                    possible_units.append(v.strip())
+                                    
+                    if not possible_qtys:
+                        continue
                         
-                        if wh_int == 1:
-                            raw_rows.append(item_data)
-                        elif wh_int == 3:
-                            ready_rows.append(item_data)
+                    qty_val = possible_qtys[0] # أول رقم يتم اعتباره الكمية
+                    if qty_val == 0:
+                        continue # حذف الصفوف صفرية الكمية
+                        
+                    if possible_units:
+                        unit_val = possible_units[0] # أخذ الوحدة الأولى المكتشفة
+                        
+                    item_data = [item_name, unit_val, qty_val]
+                    
+                    if wh_val == 1:
+                        raw_rows.append(item_data)
+                    elif wh_val == 3:
+                        ready_rows.append(item_data)
                 
                 if raw_rows:
                     format_warehouse_sheet_three_columns(
@@ -599,13 +496,10 @@ class App:
                                     row_vals.append(str(int(v)))
                                 else:
                                     row_vals.append(str(v))
-                            
                             while row_vals and row_vals[-1] == '':
                                 row_vals.pop()
-                                
                             if row_vals:
                                 f.write('\t'.join(row_vals) + '\n')
-                            
                 success_count += 1
                 
             messagebox.showinfo('نجاح التحويل', f'تم تحويل {success_count} ملف بنجاح!\nموجودة الآن في مجلد (ملفات_TXT_الأمين) على سطح المكتب.')
