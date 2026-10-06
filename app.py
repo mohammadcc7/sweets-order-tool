@@ -8,18 +8,27 @@ import subprocess
 import platform
 import re
 
-# دالة لتنظيف واستخراج اسم المحل فقط وتجاهل كلمات مثل (طلبات، طلب، طلبية)
+# دالة لتنظيف واستخراج اسم المحل مع الحفاظ على الأسماء المركبة مثل (ضاحية قدسية، مشروع دمر)
 def extract_clean_store_name(filename):
-    # إزالة اللاحقة مثل .xlsx أو .xls
     base = os.path.splitext(os.path.basename(filename))[0]
-    # قائمة الكلمات الزائدة التي نريد تنظيفها من اسم الملف
-    stop_words = ['طلبات', 'طلب', 'طلبية', 'مجمع', 'ضاحية']
     
-    # تنظيف النص وإزالة المسافات الزائدة
+    # التحقق أولاً من الأسماء المركبة بالكامل لضمان عدم ضياعها
+    base_lower = base.lower()
+    if 'ضاحية قدسية' in base or 'مجمع ضاحية قدسية' in base:
+        return 'ضاحية قدسية'
+    if 'مشروع دمر' in base:
+        return 'مشروع دمر'
+    if 'دمر البلد' in base:
+        return 'دمر البلد'
+    if 'شيخ سعد' in base or 'الشيخ سعد' in base:
+        return 'شيخ سعد'
+
+    # قائمة الكلمات الزائدة العادية التي يتم إزالتها فقط إذا لم تكن جزءاً من محل مركب
+    stop_words = ['طلبات', 'طلب', 'طلبية', 'مجمع']
+    
     words = base.split()
     clean_words = [w for w in words if w not in stop_words]
     
-    # إذا بقي شيء، ندمجه، وإلا نترك الاسم الأساسي
     cleaned = ' '.join(clean_words).strip()
     if not cleaned:
         cleaned = base
@@ -185,33 +194,33 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
     ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
 
-# --- دالة مخصصة لفرز المستودعات (مع العنوان من سطرين وتصفية اسم المحل) ---
-def format_warehouse_sheet_two_lines(rows_data, output_path, store_name, subtitle_type):
+# --- دالة مخصصة لفرز المستودعات (مع العنوان من سطرين، وتضمين عمود الوحدة C) ---
+def format_warehouse_sheet_three_columns(rows_data, output_path, store_name, subtitle_type):
     wb_out = openpyxl.Workbook()
     ws_out = wb_out.active
     ws_out.title = subtitle_type
     ws_out.views.sheetView[0].rightToLeft = True
     
-    # دمج الخلايا A1 و B1 لسطر اسم المحل، و A2 و B2 للنوع (مواد أولية أو الحلو العربي)
-    # أو يمكننا وضع العنوان كسطرين داخل الخلية المدمجة A1:B1 مع تفعيل التفاف النص (wrap_text)
-    ws_out.merge_cells('A1:B1')
-    ws_out.merge_cells('A2:B2')
+    ws_out.merge_cells('A1:C1')
+    ws_out.merge_cells('A2:C2')
     
     ws_out['A1'] = f"محل {store_name}"
     ws_out['A2'] = subtitle_type
     
     ws_out['A3'] = 'اسم المادة'
-    ws_out['B3'] = 'المطلوب'
+    ws_out['B3'] = 'الوحدة'
+    ws_out['C3'] = 'المطلوب'
     
     for r in rows_data:
         item_name = r[0]
-        qty = r[1]
+        unit_name = r[1]
+        qty = r[2]
         try:
             val_float = float(qty)
             formatted_qty = int(val_float) if val_float.is_integer() else round(val_float, 2)
         except (ValueError, TypeError):
             formatted_qty = qty
-        ws_out.append([item_name, formatted_qty])
+        ws_out.append([item_name, unit_name, formatted_qty])
         
     font_title1 = Font(name='Arial', size=15, bold=True)
     font_title2 = Font(name='Arial', size=14, bold=True)
@@ -223,7 +232,6 @@ def format_warehouse_sheet_two_lines(rows_data, output_path, store_name, subtitl
     border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
     
-    # ارتفاعات السطور العلوية للعناوين
     ws_out.row_dimensions[1].height = 25
     ws_out['A1'].font = font_title1
     ws_out['A1'].alignment = center_align
@@ -233,7 +241,7 @@ def format_warehouse_sheet_two_lines(rows_data, output_path, store_name, subtitl
     ws_out['A2'].alignment = center_align
     
     ws_out.row_dimensions[3].height = 28
-    for c in range(1, 3):
+    for c in range(1, 4):
         cell = ws_out.cell(row=3, column=c)
         cell.font = font_header
         cell.fill = fill_header
@@ -242,16 +250,17 @@ def format_warehouse_sheet_two_lines(rows_data, output_path, store_name, subtitl
         
     for r in range(4, ws_out.max_row + 1):
         ws_out.row_dimensions[r].height = 26
-        for c in range(1, 3):
+        for c in range(1, 4):
             cell = ws_out.cell(row=r, column=c)
             cell.font = font_body
             cell.alignment = center_align
             cell.border = border_all
-            if r % 2 == 0:  # تبديل الألوان (Zebra) بدءاً من صف البيانات الأول
+            if r % 2 == 0:
                 cell.fill = fill_zebra
                 
     ws_out.column_dimensions['A'].width = 28
-    ws_out.column_dimensions['B'].width = 15
+    ws_out.column_dimensions['B'].width = 12
+    ws_out.column_dimensions['C'].width = 15
     ws_out.page_margins.left = ws_out.page_margins.right = 0.0
     ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
     ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
@@ -281,7 +290,6 @@ class App:
         self.current_files = []
         self.txt_converter_files = []
 
-        # --- قسم منسق طلبات الأمين (البرنامج الرئيسي) ---
         lbl_title = tk.Label(root, text='منسق ملفات الأمين للطابعة الحرارية (8سم)', font=('Arial', 13, 'bold'))
         lbl_title.pack(pady=5)
 
@@ -327,7 +335,6 @@ class App:
         self.btn_process = tk.Button(root, text='⚡ معالجة واستخراج جميع الملفات إلى مجلد سطح المكتب', font=('Arial', 11, 'bold'), bg='#28a745', fg='white', padx=15, pady=7, state='disabled', command=self.process_files)
         self.btn_process.pack(pady=5)
 
-        # --- قسم أداة تحويل Excel إلى TXT (Unicode) ---
         frame_txt_tool = tk.LabelFrame(root, text='أداة محول ملفات Excel إلى TXT (Unicode)', font=('Arial', 10, 'bold'), fg='#0056b3')
         frame_txt_tool.pack(fill='x', padx=15, pady=5)
 
@@ -463,7 +470,6 @@ class App:
             msg += '\nوتم إرسالها للطباعة المباشرة على الطابعة الحرارية.'
         messagebox.showinfo('نجاح تام', msg)
 
-    # --- دالة فرز المستودعات (مع تطبيق أسماء المحلات النظيفة والعنوان السطري المزدوج) ---
     def process_warehouses_files(self):
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
         if not file_paths:
@@ -483,7 +489,6 @@ class App:
                 wb_src = openpyxl.load_workbook(file_path, data_only=True)
                 ws_src = wb_src.active
                 
-                # استخراج اسم المحل النظيف (بدون كلمة طلبات أو طلب)
                 clean_store = extract_clean_store_name(file_path)
                 
                 raw_rows = []
@@ -493,46 +498,60 @@ class App:
                     if not any(row):
                         continue
                     
-                    qty_val = row[1] if len(row) > 1 else None
-                    if qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']:
+                    # الفرضية القياسية حسب بنية ملفات الأمين:
+                    # عمود A (index 0): اسم المادة
+                    # عمود B (index 1): الوحدة
+                    # عمود C (index 2): الكمية المطلوبة
+                    # عمود D (index 3): رقم المستودع (1 أو 3)
+                    
+                    # جلب الكمية (عادة تكون في العمود الثالث أو الأخير) وتجنب الأسطر الفارغة أو الصفرية
+                    qty_val = None
+                    unit_val = None
+                    item_name = row[0] if len(row) > 0 else None
+                    
+                    if item_name is None or str(item_name).strip() == '':
                         continue
-                    try:
-                        num_qty = float(qty_val)
-                        if num_qty == 0:
-                            continue
-                    except:
-                        continue
-
+                        
+                    # البحث عن الكمية ورقم المستودع والوحدة بمرونة أو بالترتيب القياسي
+                    # الترتيب القياسي: [المادة، الوحدة، الكمية، المستودع] أو ما شابه
                     if len(row) >= 4:
+                        item_name = row[0]
+                        unit_val = row[1] if row[1] is not None else ''
+                        qty_val = row[2]
                         wh_val = row[3]
+                        
                         try:
                             wh_int = int(float(wh_val)) if wh_val is not None and str(wh_val).strip() != '' else 0
                         except:
                             wh_int = 0
-                        
-                        item_name = row[0]
-                        if item_name is None or str(item_name).strip() == '':
+                            
+                        # التحقق من الكمية (إذا كانت فارغة أو صفر يتم استبعاد البند بالكامل)
+                        if qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']:
                             continue
-                        
-                        item_data = [item_name, qty_val]
+                        try:
+                            num_qty = float(qty_val)
+                            if num_qty == 0:
+                                continue
+                        except:
+                            continue
+                            
+                        item_data = [item_name, unit_val, qty_val]
                         
                         if wh_int == 1:
                             raw_rows.append(item_data)
                         elif wh_int == 3:
                             ready_rows.append(item_data)
                 
-                # حفظ مستودع المواد الأولية (رقم 1) بالعنوان المزدوج
                 if raw_rows:
-                    format_warehouse_sheet_two_lines(
+                    format_warehouse_sheet_three_columns(
                         raw_rows, 
                         os.path.join(raw_dir, f'{clean_store}_أولية.xlsx'), 
                         clean_store, 
                         'مواد أولية'
                     )
                 
-                # حفظ مستودع الجاهز (رقم 3) بالعنوان المزدوج
                 if ready_rows:
-                    format_warehouse_sheet_two_lines(
+                    format_warehouse_sheet_three_columns(
                         ready_rows, 
                         os.path.join(ready_dir, f'{clean_store}_جاهز.xlsx'), 
                         clean_store, 
@@ -541,11 +560,10 @@ class App:
                 
                 processed_count += 1
                 
-            messagebox.showinfo('نجاح الفرز', f'تمت معالجة وفرز {processed_count} ملف بنجاح (مع تصفية أسماء المحلات وتطبيق العنوان من سطرين)!\nالمجلدات موجودة على سطح المكتب داخل (فرز_المستودعات).')
+            messagebox.showinfo('نجاح الفرز', f'تمت معالجة وفرز {processed_count} ملف بنجاح مع إضافة عمود الوحدة وتصفية الصفرية!\nالمجلدات موجودة على سطح المكتب داخل (فرز_المستودعات).')
         except Exception as e:
             messagebox.showerror('خطأ', f'حدث خطأ أثناء معالجة المستودعات:\n{str(e)}')
 
-    # --- دوال أداة تحويل الـ TXT المحدثة لإصلاح الأصفار والفواصل ---
     def load_txt_files_dialog(self):
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
         if not file_paths:
