@@ -180,12 +180,8 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
     ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
 
-def format_warehouses_split_report(input_path, base_output_dir, direct_print=False):
-    """
-    معالجة ملفات المستودعات وفصلها وتوجيهها إلى مجلدين مستقلين على سطح المكتب:
-    1. مجلد 'مستودع الجاهز'
-    2. مجلد 'مستودع المواد الأولية'
-    """
+def process_single_warehouse_file(input_path, base_output_dir, direct_print=False):
+    """معالجة ملف مستودعات مستقل (لفزر المستودع 1 و 3)"""
     file_name = os.path.basename(input_path)
     store_name = os.path.splitext(file_name)[0]
     
@@ -195,17 +191,29 @@ def format_warehouses_split_report(input_path, base_output_dir, direct_print=Fal
     if not rows:
         return 0
         
-    col_item, col_qty, col_wh = (0, 1, 3)
+    header_row_idx = 0
+    col_item, col_qty, col_wh = 0, 1, -1
     
+    for idx, row in enumerate(rows[:5]):
+        row_strs = [str(v or '').strip() for v in row]
+        for c_idx, val in enumerate(row_strs):
+            if val in ['المادة', 'اسم المادة']:
+                col_item = c_idx
+                header_row_idx = idx
+            elif val in ['الكمية', 'المطلوب', 'تجهيز']:
+                col_qty = c_idx
+            elif 'مستودع' in val or val in ['رقم المستودع', 'المستودع']:
+                col_wh = c_idx
+
     filtered_data_wh1 = []
     filtered_data_wh3 = []
     
-    for row in rows:
-        if len(row) <= max(col_item, col_qty, col_wh):
+    for row in rows[header_row_idx + 1:]:
+        if len(row) <= max(col_item, col_qty, col_wh if col_wh != -1 else 0):
             continue
         item_val = row[col_item]
         qty_val = row[col_qty]
-        wh_val = row[col_wh]
+        wh_val = row[col_wh] if col_wh != -1 else 1
         
         if item_val is None or str(item_val).strip() == '' or str(item_val) == 'المادة':
             continue
@@ -215,7 +223,7 @@ def format_warehouses_split_report(input_path, base_output_dir, direct_print=Fal
         try:
             wh_num = int(float(wh_val))
         except (ValueError, TypeError):
-            continue
+            wh_num = 1
             
         if wh_num == 2:
             continue
@@ -239,7 +247,6 @@ def format_warehouses_split_report(input_path, base_output_dir, direct_print=Fal
     def save_to_warehouse_folder(sub_data, wh_title_suffix, folder_name):
         if not sub_data:
             return None
-        # إنشاء المجلد الفرعي على سطح المكتب (مستودع الجاهز / مستودع المواد الأولية)
         target_dir = os.path.join(base_output_dir, folder_name)
         os.makedirs(target_dir, exist_ok=True)
         
@@ -302,14 +309,12 @@ def format_warehouses_split_report(input_path, base_output_dir, direct_print=Fal
         wb_out.save(out_file_path)
         return out_file_path
 
-    # حفظ ملف المواد الأولية داخل مجلد 'مستودع المواد الأولية'
     path_w1 = save_to_warehouse_folder(filtered_data_wh1, "مستودع المواد الأولية", "مستودع المواد الأولية")
     if path_w1:
         processed_files_count += 1
         if direct_print:
             print_excel_file(path_w1)
             
-    # حفظ ملف الجاهز داخل مجلد 'مستودع الجاهز'
     path_w3 = save_to_warehouse_folder(filtered_data_wh3, "مستودع الجاهز", "مستودع الجاهز")
     if path_w3:
         processed_files_count += 1
@@ -333,10 +338,11 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title('منسق طلبات الأمين الحراري الشامل (مع محول TXT)')
-        self.root.geometry('720x760')
+        self.root.geometry('720x800')
         self.root.resizable(False, False)
         
         self.current_files = []
+        self.warehouse_files = []
         self.txt_converter_files = []
 
         lbl_title = tk.Label(root, text='منسق ملفات الأمين للطابعة الحرارية (8سم)', font=('Arial', 13, 'bold'))
@@ -349,9 +355,9 @@ class App:
         frame_type.pack(pady=5, fill='x', padx=10)
         tk.Label(frame_type, text='نوع التقرير:', font=('Arial', 10, 'bold')).pack(side='right', padx=5)
         
-        report_types = ['تعرّف تلقائي', 'المستودعات (مواد أولية وجاهز)', 'محلاية + خمس مواد', 'ورقة الفرن', 'هرايس بانواعها', 'مستودع الجاهز القديم']
-        self.file_type_var = tk.StringVar(value='تعرّف تلقائي')
-        self.combo_type = ttk.Combobox(frame_type, textvariable=self.file_type_var, values=report_types, state='readonly', font=('Arial', 10, 'bold'), width=25)
+        report_types = ['ورقة الفرن', 'هرايس بانواعها', 'مستودع الجاهز القديم', 'محلاية + خمس مواد']
+        self.file_type_var = tk.StringVar(value='ورقة الفرن')
+        self.combo_type = ttk.Combobox(frame_type, textvariable=self.file_type_var, values=report_types, state='readonly', font=('Arial', 10, 'bold'), width=22)
         self.combo_type.pack(side='right', padx=5)
 
         self.chk_var = tk.BooleanVar(value=True)
@@ -362,25 +368,32 @@ class App:
         chk_print = tk.Checkbutton(frame_controls, text='إرسال الملفات للطابعة الحرارية مباشرة بعد إنتاجها', variable=self.direct_print_var, font=('Arial', 9, 'bold'), fg='#d9534f')
         chk_print.pack(anchor='e', padx=15, pady=2)
 
+        # أزرار التشغيل المستقلة تماماً
         frame_btns = tk.Frame(root)
-        frame_btns.pack(pady=5)
-        btn_select = tk.Button(frame_btns, text='📂 اختر ملف أو عدة ملفات Excel', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=10, pady=5, command=self.load_files_dialog)
+        frame_btns.pack(pady=8)
+        
+        # الزر الأول (الملفات القياسية والمحلات - مثل الـ 17 ملف أو الـ 4 ملفات)
+        btn_select = tk.Button(frame_btns, text='📂 اختر ملفات المحلات (القياسية)', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=8, pady=5, command=self.load_files_dialog)
         btn_select.pack(side='left', padx=5)
 
-        frame_preview = tk.LabelFrame(root, text='معاينة الملفات المختارة', font=('Arial', 9, 'bold'))
+        # الزر الثاني الجديد (مستقل تماماً لفرز المستودعات: مواد أولية وجاهز)
+        btn_warehouse = tk.Button(frame_btns, text='🏢 فرز المستودعات (مواد أولية وجاهز)', font=('Arial', 10, 'bold'), bg='#fd7e14', fg='white', padx=8, pady=5, command=self.load_warehouse_files_dialog)
+        btn_warehouse.pack(side='left', padx=5)
+
+        frame_preview = tk.LabelFrame(root, text='معاينة الملفات القياسية المختارة', font=('Arial', 9, 'bold'))
         frame_preview.pack(fill='both', expand=True, padx=15, pady=3)
 
         scroll_x = ttk.Scrollbar(frame_preview, orient='horizontal')
         scroll_y = ttk.Scrollbar(frame_preview, orient='vertical')
-        self.tree = ttk.Treeview(frame_preview, show='headings', height=5, xscrollcommand=scroll_x.set, yscrollcommand=scroll_y.set)
+        self.tree = ttk.Treeview(frame_preview, show='headings', height=4, xscrollcommand=scroll_x.set, yscrollcommand=scroll_y.set)
         scroll_x.config(command=self.tree.xview)
         scroll_y.config(command=self.tree.yview)
         scroll_x.pack(side='bottom', fill='x')
         scroll_y.pack(side='left', fill='y')
         self.tree.pack(fill='both', expand=True, padx=5, pady=5)
 
-        self.btn_process = tk.Button(root, text='⚡ معالجة واستخراج جميع الملفات إلى مجلدات سطح المكتب', font=('Arial', 11, 'bold'), bg='#28a745', fg='white', padx=15, pady=7, state='disabled', command=self.process_files)
-        self.btn_process.pack(pady=5)
+        self.btn_process = tk.Button(root, text='⚡ معالجة واستخراج ملفات المحلات القياسية', font=('Arial', 11, 'bold'), bg='#28a745', fg='white', padx=15, pady=6, state='disabled', command=self.process_files)
+        self.btn_process.pack(pady=3)
 
         frame_txt_tool = tk.LabelFrame(root, text='أداة محول ملفات Excel إلى TXT (Unicode)', font=('Arial', 10, 'bold'), fg='#0056b3')
         frame_txt_tool.pack(fill='x', padx=15, pady=5)
@@ -391,43 +404,41 @@ class App:
         frame_txt_btns = tk.Frame(frame_txt_tool)
         frame_txt_btns.pack(pady=5)
 
-        btn_txt_select = tk.Button(frame_txt_btns, text='📂 (واحدة أو أكثر) Excel اختر ملفات', font=('Arial', 10, 'bold'), bg='#28a745', fg='white', padx=10, pady=5, command=self.load_txt_files_dialog)
+        btn_txt_select = tk.Button(frame_txt_btns, text='📂 (واحدة أو أكثر) Excel اختر ملفات', font=('Arial', 10, 'bold'), bg='#28a745', fg='white', padx=8, pady=4, command=self.load_txt_files_dialog)
         btn_txt_select.pack(side='left', padx=5)
 
-        self.btn_txt_convert = tk.Button(frame_txt_btns, text='🔄 TXT (Unicode) تحويل الملفات إلى', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=10, pady=5, state='disabled', command=self.convert_to_txt_files)
+        self.btn_txt_convert = tk.Button(frame_txt_btns, text='🔄 TXT (Unicode) تحويل الملفات إلى', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=8, pady=4, state='disabled', command=self.convert_to_txt_files)
         self.btn_txt_convert.pack(side='left', padx=5)
 
     def load_files_dialog(self):
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
         if not file_paths:
             return
-        self.handle_loaded_files(list(file_paths))
-
-    def handle_loaded_files(self, file_paths):
-        self.current_files = file_paths
-        self.preview_files(file_paths)
-        if len(file_paths) == 1:
-            detected = self.auto_detect_type(file_paths[0])
-            self.file_type_var.set(detected)
-        else:
-            self.file_type_var.set('تعرّف تلقائي')
+        self.current_files = list(file_paths)
+        self.preview_files(self.current_files)
         self.btn_process.config(state='normal')
 
-    def auto_detect_type(self, file_path):
-        try:
-            filename = os.path.basename(file_path).lower()
-            if 'هرايس' in filename or 'harees' in filename:
-                return 'هرايس بانواعها'
-            elif 'مستودع' in filename or 'جاهز' in filename or 'warehouse' in filename:
-                return 'المستودعات (مواد أولية وجاهز)'
-            elif 'فرن' in filename or 'oven' in filename:
-                return 'ورقة الفرن'
-            elif 'مبيع' in filename or 'طلبات' in filename or 'محلاية' in filename:
-                return 'محلاية + خمس مواد'
-            else:
-                return 'المستودعات (مواد أولية وجاهز)'
-        except Exception:
-            return 'المستودعات (مواد أولية وجاهز)'
+    def load_warehouse_files_dialog(self):
+        """دالة زر فرز المستودعات المستقل تماماً"""
+        file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
+        if not file_paths:
+            return
+        
+        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+        direct_print = self.direct_print_var.get()
+        processed_count = 0
+        
+        for file_path in file_paths:
+            try:
+                count = process_single_warehouse_file(file_path, desktop_path, direct_print)
+                processed_count += count
+            except Exception as e:
+                continue
+                
+        msg = f'تمت معالجة وفرز ملفات المستودعات بنجاح تام ({processed_count} ملف ناتج)!\nوموجودة في مجلداتها على سطح المكتب.'
+        if direct_print:
+            msg += '\nوتم إرسالها للطباعة المباشرة.'
+        messagebox.showinfo('نجاح فرز المستودعات', msg)
 
     def preview_files(self, file_paths):
         for item in self.tree.get_children():
@@ -443,116 +454,4 @@ class App:
             cols = [f'col_{i}' for i in range(len(header_row))]
             self.tree['columns'] = cols
             for i, col_name in enumerate(header_row):
-                header_text = str(col_name) if col_name is not None else f'عمود {i + 1}'
-                self.tree.heading(f'col_{i}', text=header_text)
-                self.tree.column(f'col_{i}', width=100, anchor='center')
-            for row in rows[1:6]:
-                self.tree.insert('', 'end', values=[str(v) if v is not None else '' for v in row])
-        except Exception as e:
-            messagebox.showerror('خطأ', f'تعذر معاينة الملف:\n{str(e)}')
-
-    def process_files(self):
-        if not self.current_files:
-            return
-        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
-        direct_print = self.direct_print_var.get()
-        processed_count = 0
-        manual_type = self.file_type_var.get()
-        
-        for file_path in self.current_files:
-            if manual_type != 'تعرّف تلقائي':
-                detected_type = manual_type
-            else:
-                detected_type = self.auto_detect_type(file_path)
-            
-            if detected_type == 'المستودعات (مواد أولية وجاهز)':
-                try:
-                    count = format_warehouses_split_report(file_path, desktop_path, direct_print)
-                    processed_count += count
-                except Exception as e:
-                    continue
-            elif detected_type in ['ورقة الفرن', 'هرايس بانواعها', 'مستودع الجاهز القديم']:
-                try:
-                    legacy_dir = os.path.join(desktop_path, 'جاهز للطباعه')
-                    os.makedirs(legacy_dir, exist_ok=True)
-                    if detected_type == 'هرايس بانواعها':
-                        out_name = 'جاهز_للطباعة_هرايس.xlsx'
-                    elif detected_type == 'مستودع الجاهز القديم':
-                        out_name = 'جاهز_للطباعة_مستودع_الجاهز.xlsx'
-                    else:
-                        out_name = 'جاهز_للطباعة_ورقة_الفرن.xlsx'
-                    
-                    save_path = os.path.join(legacy_dir, out_name)
-                    format_standard_two_column_sheet(file_path, save_path, detected_type)
-                    if direct_print:
-                        print_excel_file(save_path)
-                    processed_count += 1
-                except Exception:
-                    continue
-            else:
-                if detected_type == 'محلاية + خمس مواد':
-                    try:
-                        legacy_dir = os.path.join(desktop_path, 'جاهز للطباعه')
-                        os.makedirs(legacy_dir, exist_ok=True)
-                        path_both = os.path.join(legacy_dir, 'جاهز_للطباعة_محلاية_وغريبة.xlsx')
-                        format_sales_orders_custom(file_path, path_both, selected_items=['محلاية', 'غريبة بالقشطة'], report_title='محلاية + غريبة', remove_empty=self.chk_var.get())
-                        if direct_print:
-                            print_excel_file(path_both)
-                        
-                        five_items_set = {'كنافة ناعمة', 'غاز سائل كبير', 'كريمة', 'عش لحمة نية', 'عش البلبل فستق نية'}
-                        path_five = os.path.join(legacy_dir, 'جاهز_للطباعة_خمس_مواد.xlsx')
-                        format_sales_orders_custom(file_path, path_five, selected_items=five_items_set, report_title='خمس مواد', remove_empty=self.chk_var.get())
-                        if direct_print:
-                            print_excel_file(path_five)
-                        processed_count += 2
-                    except Exception:
-                        pass
-                        
-        msg = f'تمت معالجة وإخراج جميع الملفات بنجاح تام ({processed_count} ورقة)!\n\nتم تنظيمها وتوزيعها تلقائياً على مجلدين على سطح المكتب:\n- مجلد (مستودع الجاهز)\n- مجلد (مستودع المواد الأولية)'
-        if direct_print:
-            msg += '\nوتم إرسالها للطباعة المباشرة على الطابعة الحرارية.'
-        messagebox.showinfo('نجاح تام', msg)
-
-    def load_txt_files_dialog(self):
-        file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
-        if not file_paths:
-            return
-        self.txt_converter_files = list(file_paths)
-        self.lbl_txt_status.config(text=f'تم اختيار {len(self.txt_converter_files)} ملف للتحويل', fg='green')
-        self.btn_txt_convert.config(state='normal')
-
-    def convert_to_txt_files(self):
-        if not self.txt_converter_files:
-            return
-        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
-        output_dir = os.path.join(desktop_path, 'ملفات_TXT_الأمين')
-        os.makedirs(output_dir, exist_ok=True)
-        
-        success_count = 0
-        try:
-            for file_path in self.txt_converter_files:
-                wb = openpyxl.load_workbook(file_path, data_only=True)
-                ws = wb.active
-                
-                base_name = os.path.splitext(os.path.basename(file_path))[0]
-                out_txt_path = os.path.join(output_dir, f'{base_name}.txt')
-                
-                with open(out_txt_path, 'w', encoding='utf-16') as f:
-                    for row in ws.iter_rows(values_only=True):
-                        if any(row):
-                            row_vals = [str(v) if v is not None else '' for v in row]
-                            f.write('\t'.join(row_vals) + '\n')
-                            
-                success_count += 1
-                
-            messagebox.showinfo('نجاح التحويل', f'تم تحويل {success_count} ملف بنجاح!\nموجودة الآن في مجلد (ملفات_TXT_الأمين) على سطح المكتب.')
-            self.lbl_txt_status.config(text='لم يتم اختيار أي ملف للتحويل', fg='gray')
-            self.txt_converter_files = []
-            self.btn_txt_convert.config(state='disabled')
-        except Exception as e:
-            messagebox.showerror('خطأ في التحويل', f'حدث خطأ أثناء معالجة الملفات:\n{str(e)}')
-
-if __name__ == '__main__':
-    root = tk.Tk()
-    app = App(root)
-    root.mainloop()
+                header_text = str(col_name) if col_name is not None else f'عمود {i + 1
