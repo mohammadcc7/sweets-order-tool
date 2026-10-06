@@ -449,4 +449,77 @@ class App:
                 self.tree.column(cols[i], width=100, anchor='center')
             for row in rows[1:6]:
                 values = [str(cell) if cell is not None else '' for cell in row]
-                self.tree.insert('', 'end', values
+                self.tree.insert('', 'end', values=values)
+        except Exception as e:
+            messagebox.showerror('خطأ', f'حدث خطأ أثناء معاينة الملف:\n{e}')
+
+    def load_txt_files_dialog(self):
+        file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
+        if not file_paths:
+            return
+        self.txt_converter_files = list(file_paths)
+        self.lbl_txt_status.config(text=f'تم اختيار {len(file_paths)} ملف للتحويل إلى TXT', fg='green')
+        self.btn_txt_convert.config(state='normal')
+
+    def convert_to_txt_files(self):
+        if not self.txt_converter_files:
+            return
+        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+        output_dir = os.path.join(desktop_path, 'مفكرة_الأمين_Unicode')
+        os.makedirs(output_dir, exist_ok=True)
+        success_count = 0
+        for file_path in self.txt_converter_files:
+            try:
+                wb = openpyxl.load_workbook(file_path, data_only=True)
+                ws = wb.active
+                file_name = os.path.splitext(os.path.basename(file_path))[0]
+                txt_path = os.path.join(output_dir, f"{file_name}.txt")
+                with open(txt_path, 'w', encoding='utf-16') as f:
+                    for row in ws.iter_rows(values_only=True):
+                        row_vals = [str(cell) if cell is not None else '' for cell in row]
+                        if any(row_vals):
+                            f.write('\t'.join(row_vals) + '\n')
+                success_count += 1
+            except Exception as e:
+                continue
+        messagebox.showinfo('نجاح التحويل', f'تم تحويل {success_count} ملف بنجاح إلى ملفات TXT (Unicode)\nومحفوظة في مجلد على سطح المكتب.')
+
+    def process_files(self):
+        if not self.current_files:
+            return
+        desktop_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+        output_dir = os.path.join(desktop_path, 'مخرجات_الطلبات_الحرارية')
+        os.makedirs(output_dir, exist_ok=True)
+        report_type = self.file_type_var.get()
+        remove_empty = self.chk_var.get()
+        direct_print = self.direct_print_var.get()
+        processed_count = 0
+        for file_path in self.current_files:
+            file_name = os.path.basename(file_path)
+            store_name = os.path.splitext(file_name)[0]
+            out_file_name = f"{store_name}_{report_type}.xlsx"
+            out_file_path = os.path.join(output_dir, out_file_name)
+            try:
+                if report_type == 'ورقة الفرن':
+                    format_sales_orders_custom(file_path, out_file_path, selected_items=None, report_title=report_type, remove_empty=remove_empty)
+                elif report_type == 'هرايس بانواعها':
+                    selected_items = ['هرايس قشطة', 'هرايس جبنة', 'هرايس عربي', 'هرايس فستق']
+                    format_sales_orders_custom(file_path, out_file_path, selected_items=selected_items, report_title=report_type, remove_empty=remove_empty)
+                elif report_type == 'مستودع الجاهز القديم':
+                    format_standard_two_column_sheet(file_path, out_file_path, report_title=report_type)
+                elif report_type == 'محلاية + خمس مواد':
+                    format_standard_two_column_sheet(file_path, out_file_path, report_title=report_type)
+                processed_count += 1
+                if direct_print:
+                    print_excel_file(out_file_path)
+            except Exception as e:
+                continue
+        msg = f'تمت معالجة {processed_count} ملف بنجاح وتم حفظها في المجلد على سطح المكتب.'
+        if direct_print:
+            msg += '\nوتم إرسالها للطابعة الحرارية مباشرة.'
+        messagebox.showinfo('العملية تمت بنجاح', msg)
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
