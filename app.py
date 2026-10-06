@@ -178,6 +178,70 @@ def format_standard_two_column_sheet(input_path, output_path, report_title):
     ws_out.page_setup.fitToHeight = 1
     wb_out.save(output_path)
 
+# --- دالة مخصصة لتنسيق ملفات المستودعات المقسمة (بنفس نسق ورقة الفرن القياسي) ---
+def format_warehouse_sheet(rows_data, output_path, report_title):
+    wb_out = openpyxl.Workbook()
+    ws_out = wb_out.active
+    ws_out.title = report_title
+    ws_out.views.sheetView[0].rightToLeft = True
+    
+    ws_out.merge_cells('A1:B1')
+    ws_out['A1'] = report_title
+    ws_out['A2'] = 'اسم المادة'
+    ws_out['B2'] = 'المطلوب'
+    
+    for r in rows_data:
+        # r[0] هو اسم المادة، r[1] هي الكمية (عمود B)
+        item_name = r[0]
+        qty = r[1]
+        try:
+            val_float = float(qty)
+            formatted_qty = int(val_float) if val_float.is_integer() else round(val_float, 2)
+        except (ValueError, TypeError):
+            formatted_qty = qty
+        ws_out.append([item_name, formatted_qty])
+        
+    font_title = Font(name='Arial', size=16, bold=True)
+    font_header = Font(name='Arial', size=14, bold=True, color='FFFFFF')
+    font_body = Font(name='Arial', size=13, bold=True)
+    fill_header = PatternFill(start_color='000000', end_color='000000', fill_type='solid')
+    fill_zebra = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+    thin_side = Side(style='thin', color='000000')
+    border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    
+    ws_out.row_dimensions[1].height = 32
+    ws_out['A1'].font = font_title
+    ws_out['A1'].alignment = center_align
+    
+    ws_out.row_dimensions[2].height = 28
+    for c in range(1, 3):
+        cell = ws_out.cell(row=2, column=c)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = center_align
+        cell.border = border_all
+        
+    for r in range(3, ws_out.max_row + 1):
+        ws_out.row_dimensions[r].height = 26
+        for c in range(1, 3):
+            cell = ws_out.cell(row=r, column=c)
+            cell.font = font_body
+            cell.alignment = center_align
+            cell.border = border_all
+            if r % 2 == 1:
+                cell.fill = fill_zebra
+                
+    ws_out.column_dimensions['A'].width = 28
+    ws_out.column_dimensions['B'].width = 15
+    ws_out.page_margins.left = ws_out.page_margins.right = 0.0
+    ws_out.page_margins.top = ws_out.page_margins.bottom = 0.01
+    ws_out.page_setup.orientation = ws_out.ORIENTATION_PORTRAIT
+    ws_out.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_out.page_setup.fitToWidth = 1
+    ws_out.page_setup.fitToHeight = 1
+    wb_out.save(output_path)
+
 def print_excel_file(file_path):
     try:
         if platform.system() == 'Windows':
@@ -192,7 +256,7 @@ def print_excel_file(file_path):
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title('منسق طلبات الأمين الحراري الشامل (مع محول TXT وفرز المستودعات)')
+        self.root.title('منسق طلبات الأمين الحراري الشامل (مع التنسيق القياسي للطباعة)')
         self.root.geometry('720x780')
         self.root.resizable(False, False)
         
@@ -221,14 +285,12 @@ class App:
         chk_print = tk.Checkbutton(frame_controls, text='إرسال الملفات للطابعة الحرارية مباشرة بعد إنتاجها', variable=self.direct_print_var, font=('Arial', 9, 'bold'), fg='#d9534f')
         chk_print.pack(anchor='e', padx=15, pady=2)
 
-        # إطار أزرار الاختيار (الزر القديم والزر الجديد بجانبه)
         frame_btns = tk.Frame(root)
         frame_btns.pack(pady=5)
         
         btn_select = tk.Button(frame_btns, text='📂 اختر ملف أو عدة ملفات Excel', font=('Arial', 10, 'bold'), bg='#007bff', fg='white', padx=10, pady=5, command=self.load_files_dialog)
         btn_select.pack(side='left', padx=5)
 
-        # الزر الجديد لفرز ملفات المستودعات (1 و 3)
         btn_warehouses = tk.Button(frame_btns, text='🏢 فرز وتوزيع ملفات المستودعات (1 و 3)', font=('Arial', 10, 'bold'), bg='#6f42c1', fg='white', padx=10, pady=5, command=self.process_warehouses_files)
         btn_warehouses.pack(side='left', padx=5)
 
@@ -247,7 +309,7 @@ class App:
         self.btn_process = tk.Button(root, text='⚡ معالجة واستخراج جميع الملفات إلى مجلد سطح المكتب', font=('Arial', 11, 'bold'), bg='#28a745', fg='white', padx=15, pady=7, state='disabled', command=self.process_files)
         self.btn_process.pack(pady=5)
 
-        # --- قسم أداة تحويل Excel إلى TXT (Unicode) بالزرين المنفصلين ---
+        # --- قسم أداة تحويل Excel إلى TXT (Unicode) ---
         frame_txt_tool = tk.LabelFrame(root, text='أداة محول ملفات Excel إلى TXT (Unicode)', font=('Arial', 10, 'bold'), fg='#0056b3')
         frame_txt_tool.pack(fill='x', padx=15, pady=5)
 
@@ -383,7 +445,7 @@ class App:
             msg += '\nوتم إرسالها للطباعة المباشرة على الطابعة الحرارية.'
         messagebox.showinfo('نجاح تام', msg)
 
-    # --- دالة الزر الجديد: فرز ملفات المستودعات (1 و 3) في مجلدين منفصلين ---
+    # --- دالة فرز المستودعات (1 و 3) مع فلترة الكميات وتطبيق التنسيق القياسي للطباعة ---
     def process_warehouses_files(self):
         file_paths = filedialog.askopenfilenames(filetypes=[('Excel Files', '*.xlsx *.xls')])
         if not file_paths:
@@ -411,7 +473,19 @@ class App:
                 for row in ws_src.iter_rows(values_only=True):
                     if not any(row):
                         continue
-                    # البحث عن العمود D (الفهرس 3) لمعرفة رقم المستودع
+                    
+                    # 1. التحقق من الكمية في عمود B (الفهرس 1): إذا كانت فارغة أو صفر، نستبعد السطر
+                    qty_val = row[1] if len(row) > 1 else None
+                    if qty_val is None or str(qty_val).strip() in ['', '0', 'None', '0.0']:
+                        continue
+                    try:
+                        num_qty = float(qty_val)
+                        if num_qty == 0:
+                            continue
+                    except:
+                        continue
+
+                    # 2. التحقق من رقم المستودع في العمود D (الفهرس 3)
                     if len(row) >= 4:
                         wh_val = row[3]
                         try:
@@ -419,34 +493,29 @@ class App:
                         except:
                             wh_int = 0
                         
+                        # نأخذ اسم المادة (عمود A الفهرس 0) والكمية (عمود B الفهرس 1)
+                        item_name = row[0]
+                        if item_name is None or str(item_name).strip() == '':
+                            continue
+                        
+                        item_data = [item_name, qty_val]
+                        
                         if wh_int == 1:
-                            raw_rows.append(row[:3]) # أخذ الأعمدة الأولى (المادة، الكمية، الوحدة مثلاً)
+                            raw_rows.append(item_data)
                         elif wh_int == 3:
-                            ready_rows.append(row[:3])
+                            ready_rows.append(item_data)
                 
-                # حفظ مستودع المواد الأولية (رقم 1) إن وجد بيانات
+                # حفظ مستودع المواد الأولية (رقم 1) بالتنسيق الاحترافي
                 if raw_rows:
-                    wb_raw = openpyxl.Workbook()
-                    ws_raw = wb_raw.active
-                    ws_raw.title = 'المواد الأولية'
-                    ws_raw.views.sheetView[0].rightToLeft = True
-                    for r in raw_rows:
-                        ws_raw.append(list(r))
-                    wb_raw.save(os.path.join(raw_dir, f'{base_name}_أولية.xlsx'))
+                    format_warehouse_sheet(raw_rows, os.path.join(raw_dir, f'{base_name}_أولية.xlsx'), 'المواد الأولية')
                 
-                # حفظ مستودع الجاهز (رقم 3) إن وجد بيانات
+                # حفظ مستودع الجاهز (رقم 3) بالتنسيق الاحترافي
                 if ready_rows:
-                    wb_ready = openpyxl.Workbook()
-                    ws_ready = wb_ready.active
-                    ws_ready.title = 'المستودع الجاهز'
-                    ws_ready.views.sheetView[0].rightToLeft = True
-                    for r in ready_rows:
-                        ws_ready.append(list(r))
-                    wb_ready.save(os.path.join(ready_dir, f'{base_name}_جاهز.xlsx'))
+                    format_warehouse_sheet(ready_rows, os.path.join(ready_dir, f'{base_name}_جاهز.xlsx'), 'مستودع الجاهز')
                 
                 processed_count += 1
                 
-            messagebox.showinfo('نجاح الفرز', f'تمت معالجة وفرز {processed_count} ملف بنجاح!\nالمجلدات موجودة على سطح المكتب داخل (فرز_المستودعات).')
+            messagebox.showinfo('نجاح الفرز', f'تمت معالجة وفرز {processed_count} ملف بنجاح (مع فلترة الكميات وتطبيق التنسيق القياسي للطباعة)!\nالمجلدات موجودة على سطح المكتب داخل (فرز_المستودعات).')
         except Exception as e:
             messagebox.showerror('خطأ', f'حدث خطأ أثناء معالجة المستودعات:\n{str(e)}')
 
